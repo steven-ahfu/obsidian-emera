@@ -16,16 +16,13 @@
     "skipLibCheck": true,
     "lib": [
       "DOM",
-      "ES5",
-      "ES6",
-      "ES7",
-      "ES2020", 
-      "ES2022", 
-      "esnext.promise",
+      "ES2020",
+      "ES2024"
     ]
   },
   "include": [
     "**/*.ts",
-    "**/*.tsx"
+    "**/*.tsx",
+    "**/*.d.ts"
   ]
 }

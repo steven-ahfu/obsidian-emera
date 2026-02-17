@@ -42,16 +42,22 @@ function importRewriter() {
 
                     const properties = specifiers.map((specifier: any) => {
                         if (t.isImportSpecifier(specifier)) {
-                            if (specifier.imported.name === specifier.local.name) {
+                            const importedName = t.isIdentifier(specifier.imported)
+                                ? specifier.imported.name
+                                : specifier.imported.value;
+                            const importedKey = t.isValidIdentifier(importedName)
+                                ? t.identifier(importedName)
+                                : t.stringLiteral(importedName);
+                            if (importedName === specifier.local.name) {
                                 return t.objectProperty(
-                                    t.identifier(specifier.imported.name),
+                                    importedKey,
                                     t.identifier(specifier.local.name),
                                     false,
                                     true
                                 );
                             } else {
                                 return t.objectProperty(
-                                    t.identifier(specifier.imported.name),
+                                    importedKey,
                                     t.identifier(specifier.local.name)
                                 );
                             }
@@ -361,14 +367,14 @@ const rollupVirtualFsPlugin = (plugin: EmeraPlugin, path: string): RollupPlugin 
     }
 });
 
-const rollupBabelPlugin = (plugin: EmeraPlugin): RollupPlugin => ({
+const rollupBabelPlugin = (_plugin: EmeraPlugin): RollupPlugin => ({
     name: 'babel-plugin',
-    transform(code, id) {
+    transform(code, _id) {
         return { code: transpileCode(code) };
     }
 });
 
-const rollupCssPlugin = (plugin: EmeraPlugin): RollupPlugin => ({
+const rollupCssPlugin = (_plugin: EmeraPlugin): RollupPlugin => ({
     name: 'emera-styles',
     transform(code, id) {
         if (!id.endsWith('.css')) return;
