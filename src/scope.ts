@@ -1,5 +1,5 @@
-import { EMERA_MODULES, EMERA_ROOT_SCOPE } from "./consts";
-import type { EmeraPlugin } from "./plugin";
+import { EMERA_MODULES, EMERA_ROOT_SCOPE } from './consts';
+import type { EmeraPlugin } from './plugin';
 import { TFile } from 'obsidian';
 import { safeCall } from './utils';
 
@@ -11,7 +11,8 @@ export class ScopeNode {
     private descendantsMap: Record<string, ScopeNode> = {};
     private listeners: Set<VoidFunction> = new Set();
     private willInvokeListeners = false;
-    private unblockPromiseWithResolvers: null | ReturnType<typeof Promise.withResolvers<void>> = null;
+    private unblockPromiseWithResolvers: null | ReturnType<typeof Promise.withResolvers<void>> =
+        null;
 
     constructor(public id: string) {
         this.reset();
@@ -25,7 +26,7 @@ export class ScopeNode {
         return {
             ...(this.parent ? this.parent.getAll() : {}),
             ...this.scope,
-        }
+        };
     }
 
     has(prop: string): boolean {
@@ -33,7 +34,7 @@ export class ScopeNode {
         if (this.parent) return this.parent.has(prop);
         return false;
     }
-  
+
     set(prop: string, val: any) {
         this.scope[prop] = val;
         this.scheduleOnChange();
@@ -51,7 +52,7 @@ export class ScopeNode {
 
     get isBlocked(): boolean {
         if (this.parent) {
-            return !!this.unblockPromiseWithResolvers || this.parent.isBlocked;    
+            return !!this.unblockPromiseWithResolvers || this.parent.isBlocked;
         }
         return !!this.unblockPromiseWithResolvers;
     }
@@ -78,7 +79,7 @@ export class ScopeNode {
     }
 
     private scheduleOnChange() {
-        if (this.willInvokeListeners) return
+        if (this.willInvokeListeners) return;
         setTimeout(() => {
             this.willInvokeListeners = false;
             this.invokeListeners();
@@ -88,21 +89,26 @@ export class ScopeNode {
 
     private invokeListeners() {
         this.listeners.forEach(safeCall);
-        this.children.forEach(child => child.invokeListeners());
+        this.children.forEach((child) => child.invokeListeners());
     }
 
     reset() {
-        this.scope = new Proxy({}, {
-            get: (target, prop: string, receiver) => {
-                if (Object.hasOwn(target, prop)) {
-                    return Reflect.get(target, prop, receiver);
-                }
-                if (this.parent) {
-                    return this.parent.scope[prop];
-                }
-                throw new Error(`you're accessing '${prop}' but it isn't present in current scope`);
+        this.scope = new Proxy(
+            {},
+            {
+                get: (target, prop: string, receiver) => {
+                    if (Object.hasOwn(target, prop)) {
+                        return Reflect.get(target, prop, receiver);
+                    }
+                    if (this.parent) {
+                        return this.parent.scope[prop];
+                    }
+                    throw new Error(
+                        `you're accessing '${prop}' but it isn't present in current scope`,
+                    );
+                },
             },
-        });
+        );
         this.scheduleOnChange();
     }
 
@@ -135,11 +141,11 @@ export class ScopeNode {
             this.parent.children.splice(this.parent.children.indexOf(this), 1);
             this.parent.removeDescendant(this);
         }
-        this.children.forEach(child => child.dispose());
+        this.children.forEach((child) => child.dispose());
     }
 
     disposeDescendants() {
-        this.children.forEach(child => child.dispose());
+        this.children.forEach((child) => child.dispose());
     }
 
     mapUp<T>(cb: (scope: ScopeNode) => T): T[] {
@@ -193,26 +199,28 @@ export const getPageScope = (plugin: EmeraPlugin, file: TFile) => {
         scope.set('file', file);
         scope.set('frontmatter', frontmatter);
 
-        plugin.registerEvent(plugin.app.metadataCache.on('changed', (changedFile, _data) => {
-            if (file.path === changedFile.path) {
-                const frontmatter = plugin.app.metadataCache.getFileCache(file)?.frontmatter;
-                scope!.set('frontmatter', frontmatter);
-                scope!.set('file', file);
-            }
-        }));
+        plugin.registerEvent(
+            plugin.app.metadataCache.on('changed', (changedFile, _data) => {
+                if (file.path === changedFile.path) {
+                    const frontmatter = plugin.app.metadataCache.getFileCache(file)?.frontmatter;
+                    scope!.set('frontmatter', frontmatter);
+                    scope!.set('file', file);
+                }
+            }),
+        );
 
         getScope('root').addChild(scope);
     }
     return scope;
-}
+};
 
 export const getAnonymousDocScope = (plugin: EmeraPlugin, docId: string) => {
     const id = `anon-doc/${docId}`;
     let scope = getScope(id);
     if (!scope) {
         scope = new ScopeNode(id);
-    
+
         getScope('root').addChild(scope);
     }
     return scope;
-}
+};

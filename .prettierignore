@@ -2,3 +2,5 @@ node_modules
 main.js
 meta.json
 yarn.lock
+.agents
+.agents

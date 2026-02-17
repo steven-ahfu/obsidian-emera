@@ -1,9 +1,5 @@
-import { Markdown } from "./Markdown";
-import { useEmeraContext } from "./context";
-import { useStorage } from "./storage";
+import { Markdown } from './Markdown';
+import { useEmeraContext } from './context';
+import { useStorage } from './storage';
 
-export {
-    Markdown,
-    useEmeraContext,
-    useStorage,
-};
+export { Markdown, useEmeraContext, useStorage };

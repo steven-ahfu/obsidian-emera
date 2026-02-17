@@ -1,23 +1,26 @@
 import type { SyntaxNode } from '@lezer/common';
 // @ts-ignore
-import { syntaxTree, tokenClassNodeProp, lineClassNodeProp } from "@codemirror/language";
+import { syntaxTree, tokenClassNodeProp, lineClassNodeProp } from '@codemirror/language';
+import { RangeSetBuilder, StateField, Transaction, EditorState } from '@codemirror/state';
+import { Decoration, DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import {
-    RangeSetBuilder,
-    StateField,
-    Transaction,
-    EditorState,
-} from "@codemirror/state";
-import {
-    Decoration,
-    DecorationSet,
-    EditorView,
-    WidgetType,
-} from "@codemirror/view";
-import { MarkdownPostProcessorContext, TFile, MarkdownView, editorInfoField, editorEditorField, editorLivePreviewField } from 'obsidian';
+    MarkdownPostProcessorContext,
+    TFile,
+    MarkdownView,
+    editorInfoField,
+    editorEditorField,
+    editorLivePreviewField,
+} from 'obsidian';
 import { EmeraPlugin } from '../plugin';
 import { iife } from '../utils';
 import { isCursorBetweenNodes, isCursorOnSameLineWithNode } from './utils';
-import { EMERA_INLINE_JS_PREFIX, EMERA_INLINE_JSX_PREFIX, EMERA_JS_LANG_NAME, EMERA_JSX_LANG_NAME, EMERA_JSX_SHORTHAND_LANG_NAME } from '../consts';
+import {
+    EMERA_INLINE_JS_PREFIX,
+    EMERA_INLINE_JSX_PREFIX,
+    EMERA_JS_LANG_NAME,
+    EMERA_JSX_LANG_NAME,
+    EMERA_JSX_SHORTHAND_LANG_NAME,
+} from '../consts';
 import { getAnonymousDocScope, getPageScope, getScope, ScopeNode } from '../scope';
 import { compileJsxIntoFactory, importFromString, transpileCode } from '../bundler';
 import { renderComponent, unmountRenderedComponent } from '../renderer';
@@ -28,42 +31,36 @@ import { EmptyBlock } from '../components/EmptyBlock';
 import { JsBlockPlaceholder } from '../components/JsBlockPlaceholder';
 import { RootComponent } from 'src/components/RootComponent';
 
-
 type ProcessorContext = {
-    file: TFile | null,
-    index: number,
-    total: number,
-    readScope: ScopeNode,
-    writeScope: ScopeNode,
-    shortcutComponent?: string,
-} & ({
-    mode: 'preview'
-    originalPreviewElement: Element
-} | {
-    mode: 'edit',
-});
+    file: TFile | null;
+    index: number;
+    total: number;
+    readScope: ScopeNode;
+    writeScope: ScopeNode;
+    shortcutComponent?: string;
+} & (
+    | {
+          mode: 'preview';
+          originalPreviewElement: Element;
+      }
+    | {
+          mode: 'edit';
+      }
+);
 
 type ToProcessEditorRecord = {
-    type:
-    | 'inline-js'
-    | 'inline-jsx'
-    | 'block-js'
-    | 'block-jsx',
-    startNode: SyntaxNode,
-    endNode: SyntaxNode,
-    content: string,
-    cursorInside: boolean,
-    shortcutComponent?: string,
+    type: 'inline-js' | 'inline-jsx' | 'block-js' | 'block-jsx';
+    startNode: SyntaxNode;
+    endNode: SyntaxNode;
+    content: string;
+    cursorInside: boolean;
+    shortcutComponent?: string;
 };
 type ToProcessPreviewRecord = {
-    type:
-    | 'inline-js'
-    | 'inline-jsx'
-    | 'block-js'
-    | 'block-jsx',
-    el: HTMLElement,
-    content: string,
-    shortcutComponent?: string,
+    type: 'inline-js' | 'inline-jsx' | 'block-js' | 'block-jsx';
+    el: HTMLElement;
+    content: string;
+    shortcutComponent?: string;
 };
 
 type ProcessFunction = (wrapper: HTMLElement, content: string, ctx: ProcessorContext) => void;
@@ -75,7 +72,11 @@ export class EmeraCodeProcessor {
         this.plugin = plugin;
     }
 
-    processInlineJs: ProcessFunction = async (wrapper: HTMLElement, content: string, ctx: ProcessorContext) => {
+    processInlineJs: ProcessFunction = async (
+        wrapper: HTMLElement,
+        content: string,
+        ctx: ProcessorContext,
+    ) => {
         const code = content.slice(EMERA_INLINE_JS_PREFIX.length);
         wrapper.classList.add('emera-inline-js');
         wrapper.textContent = 'Loading...';
@@ -100,7 +101,11 @@ export class EmeraCodeProcessor {
         wrapper.textContent = evaluated;
     };
 
-    processInlineJsx: ProcessFunction = async (wrapper: HTMLElement, content: string, ctx: ProcessorContext) => {
+    processInlineJsx: ProcessFunction = async (
+        wrapper: HTMLElement,
+        content: string,
+        ctx: ProcessorContext,
+    ) => {
         const code = content.slice(EMERA_INLINE_JSX_PREFIX.length);
         wrapper.classList.add('emera-inline-jsx');
 
@@ -136,7 +141,11 @@ export class EmeraCodeProcessor {
         }
     };
 
-    processBlockJs: ProcessFunction = async (wrapper: HTMLElement, content: string, ctx: ProcessorContext) => {
+    processBlockJs: ProcessFunction = async (
+        wrapper: HTMLElement,
+        content: string,
+        ctx: ProcessorContext,
+    ) => {
         ctx.writeScope.block();
         wrapper.classList.add('emera-block-js');
         const code = content;
@@ -172,7 +181,11 @@ export class EmeraCodeProcessor {
         }
     };
 
-    processBlockJsx: ProcessFunction = async (wrapper: HTMLElement, content: string, ctx: ProcessorContext) => {
+    processBlockJsx: ProcessFunction = async (
+        wrapper: HTMLElement,
+        content: string,
+        ctx: ProcessorContext,
+    ) => {
         wrapper.classList.add('emera-block-jsx');
         // console.log('Processing JSX block');
         // console.log(content);
@@ -218,14 +231,12 @@ export class EmeraCodeProcessor {
                         },
                     });
                 }
-
-
             } catch (err) {
                 console.error(err);
                 renderComponent({
                     component: ErrorAlert,
                     props: {
-                        error: err
+                        error: err,
                     },
                     container: wrapper,
                     plugin: this.plugin,
@@ -245,8 +256,6 @@ export class EmeraCodeProcessor {
             });
         }
     };
-
-
 
     createCodeMirrorWidget = (func: ProcessFunction, inline: boolean) => {
         return class CodeMirrorWidget extends WidgetType {
@@ -275,7 +284,7 @@ export class EmeraCodeProcessor {
                     e.preventDefault();
                     view.dispatch({
                         selection: { anchor: view.posAtDOM(wrapper) },
-                        scrollIntoView: true
+                        scrollIntoView: true,
                     });
                 });
                 func(reactRootWrapper, this.content, this.ctx);
@@ -288,7 +297,7 @@ export class EmeraCodeProcessor {
                     this.rootWrapper = null;
                 }
             }
-        }
+        };
     };
 
     InlineJsWidget = this.createCodeMirrorWidget(this.processInlineJs, true);
@@ -307,14 +316,18 @@ export class EmeraCodeProcessor {
                     for (const [key, { file, queue }] of entries) {
                         delete queueMap[key];
                         console.log('[PREVIEW] Will process elements', queue);
-                        const startScope = file ? getPageScope(this.plugin, file) : getAnonymousDocScope(this.plugin, key);
+                        const startScope = file
+                            ? getPageScope(this.plugin, file)
+                            : getAnonymousDocScope(this.plugin, key);
                         await startScope.waitForUnblock();
                         console.log('[PREVIEW] Disposing page scope descendants');
                         startScope.disposeDescendants();
 
                         let readScope = startScope;
                         queue.forEach((el, index, arr) => {
-                            const writeScopeId = file ? `page/${file.path}/${index}` : `anon-doc/${key}/${index}`;
+                            const writeScopeId = file
+                                ? `page/${file.path}/${index}`
+                                : `anon-doc/${key}/${index}`;
                             let writeScope = getScope(writeScopeId);
                             if (writeScope) {
                                 writeScope.dispose();
@@ -332,11 +345,17 @@ export class EmeraCodeProcessor {
                                 writeScope,
                             };
 
-                            const replacement = document.createElement(el.type.startsWith('inline') ? 'span' : 'div');
-                            if (el.type === 'inline-js') this.processInlineJs(replacement, el.content, processorCtx);
-                            if (el.type === 'inline-jsx') this.processInlineJsx(replacement, el.content, processorCtx);
-                            if (el.type === 'block-js') this.processBlockJs(replacement, el.content, processorCtx);
-                            if (el.type === 'block-jsx') this.processBlockJsx(replacement, el.content, processorCtx);
+                            const replacement = document.createElement(
+                                el.type.startsWith('inline') ? 'span' : 'div',
+                            );
+                            if (el.type === 'inline-js')
+                                this.processInlineJs(replacement, el.content, processorCtx);
+                            if (el.type === 'inline-jsx')
+                                this.processInlineJsx(replacement, el.content, processorCtx);
+                            if (el.type === 'block-js')
+                                this.processBlockJs(replacement, el.content, processorCtx);
+                            if (el.type === 'block-jsx')
+                                this.processBlockJsx(replacement, el.content, processorCtx);
 
                             readScope = writeScope;
                             if (el.type.startsWith('inline')) el.el.replaceWith(replacement);
@@ -349,10 +368,13 @@ export class EmeraCodeProcessor {
             }
         };
 
-        const queueMap: Record<string, {
-            file: TFile | null,
-            queue: ToProcessPreviewRecord[],
-        }> = {};
+        const queueMap: Record<
+            string,
+            {
+                file: TFile | null;
+                queue: ToProcessPreviewRecord[];
+            }
+        > = {};
 
         let isProcessing = false;
 
@@ -364,51 +386,66 @@ export class EmeraCodeProcessor {
 
             // console.log('MD post', el, ctx);
 
-            const file = ctx.sourcePath ? this.plugin.app.vault.getFileByPath(ctx.sourcePath) : null;
+            const file = ctx.sourcePath
+                ? this.plugin.app.vault.getFileByPath(ctx.sourcePath)
+                : null;
             const code = Array.from(el.querySelectorAll('code'));
             const toProcess = code.flatMap((el): ToProcessPreviewRecord[] => {
                 const content = el.textContent ?? '';
                 if (el.parentElement?.tagName.toLowerCase() === 'pre') {
                     // Multi-line code block
                     console.log('Process el', el.className);
-                    if (el.className.includes(`language-${EMERA_JSX_LANG_NAME}`) || el.className.includes(`language-${EMERA_JSX_SHORTHAND_LANG_NAME}`)) {
-                        const regex = new RegExp(`language-(?:${EMERA_JSX_LANG_NAME}|${EMERA_JSX_SHORTHAND_LANG_NAME}):([\\S]+)`);
+                    if (
+                        el.className.includes(`language-${EMERA_JSX_LANG_NAME}`) ||
+                        el.className.includes(`language-${EMERA_JSX_SHORTHAND_LANG_NAME}`)
+                    ) {
+                        const regex = new RegExp(
+                            `language-(?:${EMERA_JSX_LANG_NAME}|${EMERA_JSX_SHORTHAND_LANG_NAME}):([\\S]+)`,
+                        );
                         const match = regex.exec(el.className);
                         const componentSpecifier = match?.[1];
                         console.log('Process el', el.className, 'match', match);
-                        return [{
-                            type: 'block-jsx',
-                            el,
-                            content,
-                            shortcutComponent: componentSpecifier,
-                        }];
+                        return [
+                            {
+                                type: 'block-jsx',
+                                el,
+                                content,
+                                shortcutComponent: componentSpecifier,
+                            },
+                        ];
                     }
 
                     if (el.className.includes(`language-${EMERA_JS_LANG_NAME}`)) {
-                        return [{
-                            type: 'block-js',
-                            el,
-                            content,
-                        }];
+                        return [
+                            {
+                                type: 'block-js',
+                                el,
+                                content,
+                            },
+                        ];
                     }
 
                     return [];
                 } else {
                     // Inline
                     if (content.startsWith(EMERA_INLINE_JSX_PREFIX)) {
-                        return [{
-                            type: 'inline-jsx',
-                            el,
-                            content,
-                        }];
+                        return [
+                            {
+                                type: 'inline-jsx',
+                                el,
+                                content,
+                            },
+                        ];
                     }
 
                     if (content.startsWith(EMERA_INLINE_JS_PREFIX)) {
-                        return [{
-                            type: 'inline-js',
-                            el,
-                            content,
-                        }];
+                        return [
+                            {
+                                type: 'inline-js',
+                                el,
+                                content,
+                            },
+                        ];
                     }
 
                     return [];
@@ -430,14 +467,18 @@ export class EmeraCodeProcessor {
     codemirrorStateField = iife(() => {
         const parent = this;
         type PluginState = {
-            decorations: DecorationSet,
-            cache: { type: string, content: string, key: string, cursorInside: boolean }[],
+            decorations: DecorationSet;
+            cache: { type: string; content: string; key: string; cursorInside: boolean }[];
         };
 
-        const processCodeblocks = ({ oldState, editorState, transaction }: {
-            oldState?: PluginState,
-            editorState?: EditorState,
-            transaction?: Transaction
+        const processCodeblocks = ({
+            oldState,
+            editorState,
+            transaction,
+        }: {
+            oldState?: PluginState;
+            editorState?: EditorState;
+            transaction?: Transaction;
         }): PluginState => {
             if (!oldState) {
                 oldState = {
@@ -464,7 +505,6 @@ export class EmeraCodeProcessor {
                     cache: [],
                 };
             }
-
 
             // Kind of hacky, officially editorInfoField contains MarkdownFileInfo, which is limited
             // subset of MarkdownView, but in fact this state field contains full MarkdownView
@@ -506,10 +546,18 @@ export class EmeraCodeProcessor {
                 enter: (node) => {
                     const nodeContent = state.doc.sliceString(node.from, node.to);
 
-                    const tokenTypes = ((node.type.prop(tokenClassNodeProp) as string) || '').split(' ');
-                    if (tokenTypes.includes('inline-code') && (nodeContent.startsWith(EMERA_INLINE_JS_PREFIX) || nodeContent.startsWith(EMERA_INLINE_JSX_PREFIX))) {
+                    const tokenTypes = ((node.type.prop(tokenClassNodeProp) as string) || '').split(
+                        ' ',
+                    );
+                    if (
+                        tokenTypes.includes('inline-code') &&
+                        (nodeContent.startsWith(EMERA_INLINE_JS_PREFIX) ||
+                            nodeContent.startsWith(EMERA_INLINE_JSX_PREFIX))
+                    ) {
                         toProcess.push({
-                            type: nodeContent.startsWith(EMERA_INLINE_JS_PREFIX) ? 'inline-js' : 'inline-jsx',
+                            type: nodeContent.startsWith(EMERA_INLINE_JS_PREFIX)
+                                ? 'inline-js'
+                                : 'inline-jsx',
                             startNode: node.node,
                             endNode: node.node,
                             content: nodeContent,
@@ -517,30 +565,45 @@ export class EmeraCodeProcessor {
                         });
                     }
 
-                    const lineTypes = ((node.type.prop(lineClassNodeProp) as string) || '').split(' ');
+                    const lineTypes = ((node.type.prop(lineClassNodeProp) as string) || '').split(
+                        ' ',
+                    );
                     const isFenceStart = lineTypes.includes('HyperMD-codeblock-begin');
                     const isFenceEnd = lineTypes.includes('HyperMD-codeblock-end');
-                    const containstEmeraSpecifier = nodeContent.trim().endsWith(EMERA_JSX_LANG_NAME) || nodeContent.trim().includes(`${EMERA_JSX_SHORTHAND_LANG_NAME}:`) || nodeContent.trim().endsWith(EMERA_JS_LANG_NAME);
+                    const containstEmeraSpecifier =
+                        nodeContent.trim().endsWith(EMERA_JSX_LANG_NAME) ||
+                        nodeContent.trim().includes(`${EMERA_JSX_SHORTHAND_LANG_NAME}:`) ||
+                        nodeContent.trim().endsWith(EMERA_JS_LANG_NAME);
 
                     if (isFenceStart && containstEmeraSpecifier && !currentBlockStartNode) {
                         currentBlockStartNode = node.node;
-                        currentBlockStartType = nodeContent.trim().endsWith(EMERA_JS_LANG_NAME) ? 'block-js' : 'block-jsx';
+                        currentBlockStartType = nodeContent.trim().endsWith(EMERA_JS_LANG_NAME)
+                            ? 'block-js'
+                            : 'block-jsx';
                     } else if (isFenceEnd && currentBlockStartNode) {
-                        const text = state.doc.sliceString(currentBlockStartNode.from, node.to).trim();
+                        const text = state.doc
+                            .sliceString(currentBlockStartNode.from, node.to)
+                            .trim();
 
-                        const regex = new RegExp(`([\`~]{3,})(?:${EMERA_JS_LANG_NAME}|(?:${EMERA_JSX_LANG_NAME}|${EMERA_JSX_SHORTHAND_LANG_NAME}):?(\\S+)?)\\n([\\s\\S]+)\\n\\1`);
+                        const regex = new RegExp(
+                            `([\`~]{3,})(?:${EMERA_JS_LANG_NAME}|(?:${EMERA_JSX_LANG_NAME}|${EMERA_JSX_SHORTHAND_LANG_NAME}):?(\\S+)?)\\n([\\s\\S]+)\\n\\1`,
+                        );
                         const match = regex.exec(text);
 
                         if (match) {
                             const componentSpecifier = match[2];
-                            const code = match[3]
+                            const code = match[3];
 
                             toProcess.push({
                                 type: currentBlockStartType!,
                                 startNode: currentBlockStartNode,
                                 endNode: node.node,
                                 content: code,
-                                cursorInside: isCursorBetweenNodes(state, currentBlockStartNode, node),
+                                cursorInside: isCursorBetweenNodes(
+                                    state,
+                                    currentBlockStartNode,
+                                    node,
+                                ),
                                 shortcutComponent: componentSpecifier ?? undefined,
                             });
                         }
@@ -563,7 +626,7 @@ export class EmeraCodeProcessor {
             // console.log('[EDITOR] Disposing page scope descendants', pageScope.id);
             // pageScope.disposeDescendants();
 
-            const cache: PluginState["cache"] = [];
+            const cache: PluginState['cache'] = [];
             let shouldForceCached = false;
             let shouldReevaluate = false;
             let readScope = pageScope;
@@ -582,10 +645,11 @@ export class EmeraCodeProcessor {
                             shouldReevaluate = true;
                         }
                         return randomKey;
-                    };
+                    }
                     if (shouldForceCached) return cacheEntry?.key ?? randomKey;
                     if (!cacheEntry || shouldReevaluate) return randomKey;
-                    if (cacheEntry.type === el.type && cacheEntry.content === el.content) return cacheEntry.key;
+                    if (cacheEntry.type === el.type && cacheEntry.content === el.content)
+                        return cacheEntry.key;
 
                     if (cacheEntry.type === 'block-js' || el.type === 'block-js') {
                         shouldReevaluate = true;
@@ -595,8 +659,14 @@ export class EmeraCodeProcessor {
                     return randomKey;
                 });
 
-                console.log('Record', index, el.type, 'render key', renderKey, `(old key ${cacheEntry?.key})`);
-
+                console.log(
+                    'Record',
+                    index,
+                    el.type,
+                    'render key',
+                    renderKey,
+                    `(old key ${cacheEntry?.key})`,
+                );
 
                 cache.push({
                     type: el.type,
@@ -632,20 +702,23 @@ export class EmeraCodeProcessor {
                 } as const;
                 // TODO: it will be good to re-use React roots so widgets will be able to preserve state between renders
                 const widget = iife(() => {
-                    if (el.type === 'inline-js') return new parent.InlineJsWidget(renderKey, el.content, ctx);
-                    if (el.type === 'inline-jsx') return new parent.InlineJsxWidget(renderKey, el.content, ctx);
-                    if (el.type === 'block-js') return new parent.BlockJsWidget(renderKey, el.content, ctx);
-                    if (el.type === 'block-jsx') return new parent.BlockJsxWidget(renderKey, el.content, ctx);
+                    if (el.type === 'inline-js')
+                        return new parent.InlineJsWidget(renderKey, el.content, ctx);
+                    if (el.type === 'inline-jsx')
+                        return new parent.InlineJsxWidget(renderKey, el.content, ctx);
+                    if (el.type === 'block-js')
+                        return new parent.BlockJsWidget(renderKey, el.content, ctx);
+                    if (el.type === 'block-jsx')
+                        return new parent.BlockJsxWidget(renderKey, el.content, ctx);
                 });
                 const isInline = el.type.startsWith('inline');
-                const decorationStart = Math.max(isInline ? el.startNode.from : el.startNode.from - 1, 0);
+                const decorationStart = Math.max(
+                    isInline ? el.startNode.from : el.startNode.from - 1,
+                    0,
+                );
                 const decorationEnd = isInline ? el.endNode.to : el.endNode.to + 1;
                 console.log('[EDITOR] Adding decoration', decorationStart, decorationEnd, widget);
-                builder.add(
-                    decorationStart,
-                    decorationEnd,
-                    Decoration.replace({ widget })
-                );
+                builder.add(decorationStart, decorationEnd, Decoration.replace({ widget }));
                 readScope = writeScope;
             });
 
@@ -666,12 +739,12 @@ export class EmeraCodeProcessor {
             update(oldState: PluginState, transaction: Transaction): PluginState {
                 return processCodeblocks({
                     oldState,
-                    transaction
+                    transaction,
                 });
             },
 
             provide(field: StateField<PluginState>) {
-                return EditorView.decorations.from(field, f => f.decorations);
+                return EditorView.decorations.from(field, (f) => f.decorations);
             },
         });
     });

@@ -1,24 +1,36 @@
 import { MarkdownRenderer } from 'obsidian';
-import { ComponentProps, useEffect, useRef } from "react";
+import { ComponentProps, ElementType, forwardRef, useEffect, useRef } from 'react';
 import { useEmeraContext } from './context';
-import { mergeRefs } from "react-merge-refs";
+import { mergeRefs } from 'react-merge-refs';
 
-export const Markdown = ({ children, ref, as: Component = 'div', ...props }: { children: string, as: string } & Omit<ComponentProps<"div">, "children">) => {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const ctx = useEmeraContext();
+type MarkdownProps<T extends ElementType = 'div'> = {
+    children: string;
+    as?: T;
+} & Omit<ComponentProps<T>, 'children'>;
 
-    useEffect(() => {
-        if (!containerRef.current) return;
-        containerRef.current.replaceChildren();
-        MarkdownRenderer.render(
-            ctx.plugin.app,
-            children,
-            containerRef.current,
-            ctx.file?.path ?? '',
-            ctx.plugin,
+export const Markdown = forwardRef<HTMLDivElement, MarkdownProps>(
+    ({ children, as: Component = 'div', ...props }, forwardedRef) => {
+        const containerRef = useRef<HTMLDivElement>(null);
+        const ctx = useEmeraContext();
+
+        useEffect(() => {
+            if (!containerRef.current) return;
+            containerRef.current.replaceChildren();
+            MarkdownRenderer.render(
+                ctx.plugin.app,
+                children,
+                containerRef.current,
+                ctx.file?.path ?? '',
+                ctx.plugin,
+            );
+        }, []);
+
+        return (
+            <Component
+                {...props}
+                data-emera-markdown
+                ref={mergeRefs([containerRef, forwardedRef])}
+            ></Component>
         );
-    }, []);
-
-    // @ts-ignore
-    return <Component {...props} data-emera-markdown ref={mergeRefs([containerRef, ref])}></Component>;
-};
+    },
+);

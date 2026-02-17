@@ -23,3 +23,8 @@ data.json
 
 # esbuild meta file
 meta.json
+
+.agents
+.github
+AGENTS.md
+.agents/docs/
