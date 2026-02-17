@@ -20,7 +20,7 @@ import { isCursorBetweenNodes, isCursorOnSameLineWithNode } from './utils';
 import { EMERA_INLINE_JS_PREFIX, EMERA_INLINE_JSX_PREFIX, EMERA_JS_LANG_NAME, EMERA_JSX_LANG_NAME, EMERA_JSX_SHORTHAND_LANG_NAME } from '../consts';
 import { getAnonymousDocScope, getPageScope, getScope, ScopeNode } from '../scope';
 import { compileJsxIntoFactory, importFromString, transpileCode } from '../bundler';
-import { renderComponent } from '../renderer';
+import { renderComponent, unmountRenderedComponent } from '../renderer';
 import { LoadingInline } from '../components/LoadingInline';
 import { Root } from 'react-dom/client';
 import { ErrorAlert } from '../components/ErrorBoundary';
@@ -207,7 +207,7 @@ export class EmeraCodeProcessor {
                     });
                 } else {
                     const factory = await compileJsxIntoFactory(content, ctx.readScope);
-                    container = renderComponent({
+                    renderComponent({
                         component: RootComponent,
                         props: { factory },
                         container,
@@ -253,6 +253,7 @@ export class EmeraCodeProcessor {
             content: string;
             ctx: ProcessorContext;
             renderKey: string;
+            rootWrapper: HTMLElement | null = null;
 
             constructor(renderKey: string, content: string, ctx: ProcessorContext) {
                 super();
@@ -268,6 +269,7 @@ export class EmeraCodeProcessor {
             toDOM(view: EditorView): HTMLElement {
                 const wrapper = document.createElement(inline ? 'span' : 'div');
                 const reactRootWrapper = document.createElement(inline ? 'span' : 'div');
+                this.rootWrapper = reactRootWrapper;
                 wrapper.appendChild(reactRootWrapper);
                 wrapper.addEventListener('click', (e) => {
                     e.preventDefault();
@@ -279,6 +281,13 @@ export class EmeraCodeProcessor {
                 func(reactRootWrapper, this.content, this.ctx);
                 return wrapper;
             }
+
+            destroy(): void {
+                if (this.rootWrapper) {
+                    unmountRenderedComponent(this.rootWrapper);
+                    this.rootWrapper = null;
+                }
+            }
         }
     };
 
@@ -289,49 +298,55 @@ export class EmeraCodeProcessor {
 
     markdownPostProcessor = iife(() => {
         const processQueue = async () => {
-            processingRequested = false;
+            if (isProcessing) return;
+            isProcessing = true;
             console.log('Starting queue processing');
+            try {
+                while (Object.keys(queueMap).length > 0) {
+                    const entries = Object.entries(queueMap);
+                    for (const [key, { file, queue }] of entries) {
+                        delete queueMap[key];
+                        console.log('[PREVIEW] Will process elements', queue);
+                        const startScope = file ? getPageScope(this.plugin, file) : getAnonymousDocScope(this.plugin, key);
+                        await startScope.waitForUnblock();
+                        console.log('[PREVIEW] Disposing page scope descendants');
+                        startScope.disposeDescendants();
 
-            Object.entries(queueMap).forEach(async ([key, { file, queue }]) => {
-                console.log('[PREVIEW] Will process elements', queue);
-                const startScope = file ? getPageScope(this.plugin, file) : getAnonymousDocScope(this.plugin, key);
-                await startScope.waitForUnblock();
-                console.log('[PREVIEW] Disposing page scope descendants');
-                startScope.disposeDescendants();
+                        let readScope = startScope;
+                        queue.forEach((el, index, arr) => {
+                            const writeScopeId = file ? `page/${file.path}/${index}` : `anon-doc/${key}/${index}`;
+                            let writeScope = getScope(writeScopeId);
+                            if (writeScope) {
+                                writeScope.dispose();
+                            }
+                            writeScope = new ScopeNode(writeScopeId);
+                            readScope.addChild(writeScope);
+                            const processorCtx = {
+                                file,
+                                index,
+                                total: arr.length,
+                                mode: 'preview' as const,
+                                originalPreviewElement: el.el,
+                                shortcutComponent: el.shortcutComponent,
+                                readScope,
+                                writeScope,
+                            };
 
-                let readScope = startScope;
-                queue.forEach((el, index, arr) => {
-                    const writeScopeId = file ? `page/${file.path}/${index}` : `anon-doc/${key}/${index}`;
-                    let writeScope = getScope(writeScopeId);
-                    if (writeScope) {
-                        writeScope.dispose();
+                            const replacement = document.createElement(el.type.startsWith('inline') ? 'span' : 'div');
+                            if (el.type === 'inline-js') this.processInlineJs(replacement, el.content, processorCtx);
+                            if (el.type === 'inline-jsx') this.processInlineJsx(replacement, el.content, processorCtx);
+                            if (el.type === 'block-js') this.processBlockJs(replacement, el.content, processorCtx);
+                            if (el.type === 'block-jsx') this.processBlockJsx(replacement, el.content, processorCtx);
+
+                            readScope = writeScope;
+                            if (el.type.startsWith('inline')) el.el.replaceWith(replacement);
+                            else el.el.parentElement!.replaceWith(replacement);
+                        });
                     }
-                    writeScope = new ScopeNode(writeScopeId);
-                    readScope.addChild(writeScope);
-                    const processorCtx = {
-                        file,
-                        index,
-                        total: arr.length,
-                        mode: 'preview' as const,
-                        originalPreviewElement: el.el,
-                        shortcutComponent: el.shortcutComponent,
-                        readScope,
-                        writeScope,
-                    };
-
-                    const replacement = document.createElement(el.type.startsWith('inline') ? 'span' : 'div');
-                    if (el.type === 'inline-js') this.processInlineJs(replacement, el.content, processorCtx);
-                    if (el.type === 'inline-jsx') this.processInlineJsx(replacement, el.content, processorCtx);
-                    if (el.type === 'block-js') this.processBlockJs(replacement, el.content, processorCtx);
-                    if (el.type === 'block-jsx') this.processBlockJsx(replacement, el.content, processorCtx);
-
-                    readScope = writeScope;
-                    if (el.type.startsWith('inline')) el.el.replaceWith(replacement);
-                    else el.el.parentElement!.replaceWith(replacement);
-                });
-
-                delete queueMap[key];
-            });
+                }
+            } finally {
+                isProcessing = false;
+            }
         };
 
         const queueMap: Record<string, {
@@ -339,7 +354,7 @@ export class EmeraCodeProcessor {
             queue: ToProcessPreviewRecord[],
         }> = {};
 
-        let processingRequested = false;
+        let isProcessing = false;
 
         return (el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
             if (el.dataset.emeraMarkdown) {
@@ -407,11 +422,8 @@ export class EmeraCodeProcessor {
                 };
             }
             queueMap[ctx.docId].queue.push(...toProcess);
-            if (!processingRequested) {
-                setTimeout(() => processQueue(), 10);
-                processingRequested = true;
-                console.log('Scheduled queue processing');
-            }
+            setTimeout(() => processQueue(), 10);
+            console.log('Scheduled queue processing');
         };
     });
 

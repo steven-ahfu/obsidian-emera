@@ -13,11 +13,21 @@ export type RenderComponentParams<P extends Record<string, any>> = {
     props?: P
 };
 
+const rootsByContainer = new WeakMap<Element, Root>();
+
+export const unmountRenderedComponent = (container: Element) => {
+    const root = rootsByContainer.get(container);
+    if (!root) return;
+    root.unmount();
+    rootsByContainer.delete(container);
+};
+
 export const renderComponent = <P extends Record<string, any>>({ component, container, plugin, context, children, props }: RenderComponentParams<P>) => {
     let root: Root;
     if (container instanceof Element) {
         container.classList.add('emera-root');
-        root = createRoot(container);
+        root = rootsByContainer.get(container) ?? createRoot(container);
+        rootsByContainer.set(container, root);
     } else {
         root = container;
     }

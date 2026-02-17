@@ -1,4 +1,3 @@
-import * as obsidian from 'obsidian';
 import { EMERA_MODULES, EMERA_ROOT_SCOPE } from "./consts";
 import type { EmeraPlugin } from "./plugin";
 import { TFile } from 'obsidian';
@@ -133,7 +132,7 @@ export class ScopeNode {
 
     dispose() {
         if (this.parent) {
-            this.parent.children.splice(this.parent.children.indexOf(this));
+            this.parent.children.splice(this.parent.children.indexOf(this), 1);
             this.parent.removeDescendant(this);
         }
         this.children.forEach(child => child.dispose());
@@ -194,13 +193,13 @@ export const getPageScope = (plugin: EmeraPlugin, file: TFile) => {
         scope.set('file', file);
         scope.set('frontmatter', frontmatter);
 
-        plugin.app.metadataCache.on('changed', (changedFile, data) => {
+        plugin.registerEvent(plugin.app.metadataCache.on('changed', (changedFile, _data) => {
             if (file.path === changedFile.path) {
                 const frontmatter = plugin.app.metadataCache.getFileCache(file)?.frontmatter;
                 scope!.set('frontmatter', frontmatter);
                 scope!.set('file', file);
             }
-        });
+        }));
 
         getScope('root').addChild(scope);
     }
