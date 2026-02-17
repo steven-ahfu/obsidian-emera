@@ -10,11 +10,18 @@ import { getScope, ScopeNode } from './scope';
 const t = Babel.packages.types;
 
 const someGlobalVars = new Set([
-    'window', 'self', 'globalThis', 'document', 'console', 'app',
+    'window',
+    'self',
+    'globalThis',
+    'document',
+    'console',
+    'app',
 
     // Not really globals, but due to how Babel works, our plugin might replace those
     // before react plugin will add related imports, so we explicitly ignore them
-    '_jsx', '_Fragment', '_jsxs',
+    '_jsx',
+    '_Fragment',
+    '_jsxs',
 ]);
 
 function resolvePath(base: string, relative: string) {
@@ -37,7 +44,7 @@ function importRewriter() {
                 const source = path.node.source.value;
 
                 const ignoredPrefixes = ['.', 'http://', 'https://'];
-                if (!ignoredPrefixes.some(p => source.startsWith(p))) {
+                if (!ignoredPrefixes.some((p) => source.startsWith(p))) {
                     const specifiers = path.node.specifiers;
 
                     const properties = specifiers.map((specifier: any) => {
@@ -53,40 +60,43 @@ function importRewriter() {
                                     importedKey,
                                     t.identifier(specifier.local.name),
                                     false,
-                                    true
+                                    true,
                                 );
                             } else {
                                 return t.objectProperty(
                                     importedKey,
-                                    t.identifier(specifier.local.name)
+                                    t.identifier(specifier.local.name),
                                 );
                             }
                         } else if (t.isImportDefaultSpecifier(specifier)) {
                             return t.objectProperty(
                                 t.identifier('default'),
-                                t.identifier(specifier.local.name)
+                                t.identifier(specifier.local.name),
                             );
                         }
                     });
 
-                    const destructuring = t.variableDeclaration("const", [
+                    const destructuring = t.variableDeclaration('const', [
                         t.variableDeclarator(
                             t.objectPattern(properties),
                             t.memberExpression(
-                                t.memberExpression(t.identifier('window'), t.identifier(EMERA_MODULES)),
+                                t.memberExpression(
+                                    t.identifier('window'),
+                                    t.identifier(EMERA_MODULES),
+                                ),
                                 t.stringLiteral(source),
-                                true
-                            )
-                        )
+                                true,
+                            ),
+                        ),
                     ]);
 
                     path.replaceWith(destructuring);
                 }
-            }
-        }
+            },
+        },
     };
 }
-Babel.registerPlugin("importRewriter", importRewriter);
+Babel.registerPlugin('importRewriter', importRewriter);
 
 function scopeRewriter() {
     function isStandaloneOrFirstInChain(path: any) {
@@ -138,8 +148,10 @@ function scopeRewriter() {
                 return node.specifiers.some((specifier: any) => {
                     if (t.isExportSpecifier(specifier)) {
                         return (
-                            (t.isIdentifier(specifier.exported) && specifier.exported.name === path.node.name) ||
-                            (t.isIdentifier(specifier.local) && specifier.local.name === path.node.name)
+                            (t.isIdentifier(specifier.exported) &&
+                                specifier.exported.name === path.node.name) ||
+                            (t.isIdentifier(specifier.local) &&
+                                specifier.local.name === path.node.name)
                         );
                     }
                     return false;
@@ -170,19 +182,35 @@ function scopeRewriter() {
         let parentPath = path.parentPath;
 
         // Check if it's the operand of a typeof operator
-        if (parentPath &&
-            parentPath.isUnaryExpression({ operator: 'typeof' })) {
+        if (parentPath && parentPath.isUnaryExpression({ operator: 'typeof' })) {
             return true;
         }
 
         // Check if it's the alternate of a ConditionalExpression (ternary)
-        if (parentPath && parentPath.isConditionalExpression() && parentPath.node.alternate === path.node) {
+        if (
+            parentPath &&
+            parentPath.isConditionalExpression() &&
+            parentPath.node.alternate === path.node
+        ) {
             const test = parentPath.node.test;
-            if (!test || test.type !== 'BinaryExpression' || (test.operator !== '===' && test.operator !== '==')) return false;
-            const isUnary = (node: any) => node.type === "UnaryExpression" && node.operator === 'typeof' && node.argument.type === 'Identifier' && node.argument.name === path.node.name;
-            const isUndefined = (node: any) => node.type === 'StringLiteral' && node.value === 'undefined';
+            if (
+                !test ||
+                test.type !== 'BinaryExpression' ||
+                (test.operator !== '===' && test.operator !== '==')
+            )
+                return false;
+            const isUnary = (node: any) =>
+                node.type === 'UnaryExpression' &&
+                node.operator === 'typeof' &&
+                node.argument.type === 'Identifier' &&
+                node.argument.name === path.node.name;
+            const isUndefined = (node: any) =>
+                node.type === 'StringLiteral' && node.value === 'undefined';
 
-            return (isUnary(test.left) && isUndefined(test.right)) || (isUnary(test.right) && isUndefined(test.left));
+            return (
+                (isUnary(test.left) && isUndefined(test.right)) ||
+                (isUnary(test.right) && isUndefined(test.left))
+            );
         }
 
         return false;
@@ -194,28 +222,32 @@ function scopeRewriter() {
         if (!conditionalExpression) return false;
 
         // Check the structure of the test part of the conditional
-        const test = conditionalExpression.get("test");
+        const test = conditionalExpression.get('test');
         if (!test.isCallExpression()) return false;
 
-        const callee = test.get("callee");
+        const callee = test.get('callee');
         if (!callee.isMemberExpression()) return false;
 
         // Check if it matches window._emeraGetScope("test").has("<identifier>")
         if (
-            callee.get("object").get('callee').matchesPattern(`window.${EMERA_GET_SCOPE}`) &&
-            callee.get("property").isIdentifier({ name: "has" }) &&
-            test.get("arguments")[0].isStringLiteral({ value: identifierName })
+            callee.get('object').get('callee').matchesPattern(`window.${EMERA_GET_SCOPE}`) &&
+            callee.get('property').isIdentifier({ name: 'has' }) &&
+            test.get('arguments')[0].isStringLiteral({ value: identifierName })
         ) {
-            const consequent = conditionalExpression.get("consequent");
+            const consequent = conditionalExpression.get('consequent');
             if (
                 consequent.isCallExpression() &&
-                consequent.get("callee").isMemberExpression() &&
-                consequent.get("callee").get("object").get('callee').matchesPattern("window._emeraGetScope") &&
-                consequent.get("callee").get("property").isIdentifier({ name: "get" }) &&
-                consequent.get("arguments")[0].isStringLiteral({ value: identifierName })
+                consequent.get('callee').isMemberExpression() &&
+                consequent
+                    .get('callee')
+                    .get('object')
+                    .get('callee')
+                    .matchesPattern('window._emeraGetScope') &&
+                consequent.get('callee').get('property').isIdentifier({ name: 'get' }) &&
+                consequent.get('arguments')[0].isStringLiteral({ value: identifierName })
             ) {
                 // Check the alternate part
-                const alternate = conditionalExpression.get("alternate");
+                const alternate = conditionalExpression.get('alternate');
                 return alternate.isIdentifier({ name: identifierName });
             }
         }
@@ -253,29 +285,29 @@ function scopeRewriter() {
                                 t.callExpression(
                                     t.memberExpression(
                                         t.identifier('window'),
-                                        t.identifier(EMERA_GET_SCOPE)
+                                        t.identifier(EMERA_GET_SCOPE),
                                     ),
-                                    [t.stringLiteral(scope.id)]
+                                    [t.stringLiteral(scope.id)],
                                 ),
-                                t.identifier('has')
+                                t.identifier('has'),
                             ),
-                            [t.stringLiteral(name)]
+                            [t.stringLiteral(name)],
                         ),
                         t.callExpression(
                             t.memberExpression(
                                 t.callExpression(
                                     t.memberExpression(
                                         t.identifier('window'),
-                                        t.identifier(EMERA_GET_SCOPE)
+                                        t.identifier(EMERA_GET_SCOPE),
                                     ),
-                                    [t.stringLiteral(scope.id)]
+                                    [t.stringLiteral(scope.id)],
                                 ),
-                                t.identifier('get')
+                                t.identifier('get'),
                             ),
-                            [t.stringLiteral(name)]
+                            [t.stringLiteral(name)],
                         ),
-                        t.identifier(name)
-                    )
+                        t.identifier(name),
+                    ),
                 );
 
                 // console.log('Replacing node with');
@@ -283,42 +315,42 @@ function scopeRewriter() {
                 // console.log(Babel.packages.generator.default(replacement).code);
 
                 path.replaceWith(replacement);
-
             },
-        }
+        },
     };
 }
-Babel.registerPlugin("scopeRewriter", scopeRewriter);
+Babel.registerPlugin('scopeRewriter', scopeRewriter);
 
 type TranspileCodeOptions = {
-    rewriteImports?: boolean
-    scope?: ScopeNode,
+    rewriteImports?: boolean;
+    scope?: ScopeNode;
 };
 
 export const transpileCode = (
     code: string,
-    { rewriteImports = true, scope }: TranspileCodeOptions = {}) => {
+    { rewriteImports = true, scope }: TranspileCodeOptions = {},
+) => {
     const transpiled = Babel.transform(code, {
-        sourceType: "unambiguous",
+        sourceType: 'unambiguous',
         presets: [
             [
                 Babel.availablePresets['react'],
                 {
-                    runtime: "automatic",
-                }
+                    runtime: 'automatic',
+                },
             ],
             [
                 Babel.availablePresets['typescript'],
                 {
                     onlyRemoveTypeImports: true,
                     allExtensions: true,
-                    isTSX: true
-                }
-            ]
+                    isTSX: true,
+                },
+            ],
         ],
         plugins: [
-            ...(rewriteImports ? [Babel.availablePlugins["importRewriter"]] : []),
-            [Babel.availablePlugins["scopeRewriter"], { scope: scope ?? getScope('root') }],
+            ...(rewriteImports ? [Babel.availablePlugins['importRewriter']] : []),
+            [Babel.availablePlugins['scopeRewriter'], { scope: scope ?? getScope('root') }],
         ],
     }).code;
     if (!transpiled) {
@@ -343,7 +375,7 @@ const rollupVirtualFsPlugin = (plugin: EmeraPlugin, path: string): RollupPlugin 
             const resolvedPath = resolvePath(importer, source);
             const extensions = ['.js', '.jsx', '.ts', '.tsx', '.css'];
 
-            if (extensions.some(ext => resolvedPath.endsWith(ext))) {
+            if (extensions.some((ext) => resolvedPath.endsWith(ext))) {
                 return resolvedPath;
             }
 
@@ -364,14 +396,14 @@ const rollupVirtualFsPlugin = (plugin: EmeraPlugin, path: string): RollupPlugin 
             return null;
         }
         return plugin.app.vault.adapter.read(id);
-    }
+    },
 });
 
 const rollupBabelPlugin = (_plugin: EmeraPlugin): RollupPlugin => ({
     name: 'babel-plugin',
     transform(code, _id) {
         return { code: transpileCode(code) };
-    }
+    },
 });
 
 const rollupCssPlugin = (_plugin: EmeraPlugin): RollupPlugin => ({
@@ -388,7 +420,7 @@ const rollupCssPlugin = (_plugin: EmeraPlugin): RollupPlugin => ({
         `;
 
         return { code: injectionCode };
-    }
+    },
 });
 
 export const bundleFile = async (plugin: EmeraPlugin, path: string) => {
@@ -399,8 +431,8 @@ export const bundleFile = async (plugin: EmeraPlugin, path: string) => {
             rollupVirtualFsPlugin(plugin, path),
             rollupCssPlugin(plugin),
             rollupBabelPlugin(plugin),
-        ]
-    })
+        ],
+    });
     const { output } = await bundle.generate({ format: 'es' });
     // console.log('Bundled code');
     // console.log(output[0].code);
@@ -416,8 +448,10 @@ export const importFromString = (code: string, ignoreCache = true) => {
     return import(encodedCode);
 };
 
-
-export const compileJsxIntoFactory = async (jsx: string, scope?: ScopeNode): Promise<() => ReactNode> => {
+export const compileJsxIntoFactory = async (
+    jsx: string,
+    scope?: ScopeNode,
+): Promise<() => ReactNode> => {
     const source = `export default () => {
         return (<>${jsx}</>);
     };`;
@@ -455,7 +489,7 @@ export const loadUserModule = async (plugin: EmeraPlugin): Promise<Record<string
         const registry = await importFromString(bundledCode);
         return registry;
     } catch (err) {
-        new Notice("Error happened while loading components: " + err.toString());
+        new Notice('Error happened while loading components: ' + err.toString());
         return {};
     }
 };

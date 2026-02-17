@@ -11,7 +11,7 @@ interface PluginSettings {
 }
 
 const DEFAULT_SETTINGS: PluginSettings = {
-    componentsFolder: 'Components'
+    componentsFolder: 'Components',
 };
 
 export class EmeraPlugin extends Plugin {
@@ -47,12 +47,9 @@ export class EmeraPlugin extends Plugin {
 
         this.registerMarkdownPostProcessor(this.codeProcessor.markdownPostProcessor);
 
-        this.registerEditorExtension([
-            this.codeProcessor.codemirrorStateField,
-        ]);
+        this.registerEditorExtension([this.codeProcessor.codemirrorStateField]);
 
         // TODO: when file is renamed, we should prompt user to change its references in any Emera code block
-
 
         this.app.workspace.onLayoutReady(async () => {
             this.isFilesLoaded = true;
@@ -81,14 +78,13 @@ export class EmeraPlugin extends Plugin {
                 leaf.view.editor.refresh();
             }
         });
-
-    }
+    };
 
     refreshUserModule = async () => {
         const registry = await loadUserModule(this);
         this.rootScope.setMany(registry);
         this.refreshEditors();
-    }
+    };
 
     onunload() {
         this.storage.destroy();

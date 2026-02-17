@@ -1,7 +1,7 @@
-import { atom, Atom, getDefaultStore, useAtom } from "jotai";
+import { atom, Atom, getDefaultStore, useAtom } from 'jotai';
 import type { EmeraPlugin } from '../plugin';
-import { useEmeraContext } from "./context";
-import { normalizePath } from "obsidian";
+import { useEmeraContext } from './context';
+import { normalizePath } from 'obsidian';
 
 export const createEmeraStorage = (plugin: EmeraPlugin) => {
     const filePath = normalizePath(`${plugin.settings.componentsFolder}/storage.json`);
@@ -23,7 +23,7 @@ export const createEmeraStorage = (plugin: EmeraPlugin) => {
     };
 
     const destroy = () => {
-        unsubFunction.forEach(cb => cb());
+        unsubFunction.forEach((cb) => cb());
     };
 
     const flush = async () => {
@@ -47,18 +47,17 @@ export const createEmeraStorage = (plugin: EmeraPlugin) => {
     const getAtom = (prop: string, defaultValue: any) => {
         if (atoms[prop]) return atoms[prop];
 
-        const primitiveAtom = atom((prop in state) ? state[prop] : defaultValue);
+        const primitiveAtom = atom(prop in state ? state[prop] : defaultValue);
         atoms[prop] = primitiveAtom;
         const store = getDefaultStore();
         unsubFunction.push(
             store.sub(primitiveAtom, () => {
                 const value = store.get(primitiveAtom);
                 set(prop, value);
-            })
+            }),
         );
         return primitiveAtom;
     };
-
 
     return {
         init,

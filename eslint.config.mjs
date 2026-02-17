@@ -3,7 +3,14 @@ import tsParser from '@typescript-eslint/parser';
 
 export default [
     {
-        ignores: ['main.js', 'meta.json', 'node_modules/**'],
+        ignores: [
+            'main.js',
+            'meta.json',
+            'node_modules/**',
+            'yarn.lock',
+            '.agents/**',
+            'examples/**',
+        ],
     },
     {
         files: ['**/*.ts', '**/*.tsx', '**/*.mjs'],
