@@ -1,12 +1,7 @@
 import type { SyntaxNodeRef } from '@lezer/common';
 import {
-    EditorView,
-} from "@codemirror/view";
-import {
     EditorState,
 } from "@codemirror/state";
-import { MarkdownView } from 'obsidian';
-import type { EmeraPlugin } from '../plugin';
 
 export const isCursorOnSameLineWithNode = (state: EditorState, node1: SyntaxNodeRef, node2: SyntaxNodeRef, allowance = 0) => {
     const doc = state.doc;

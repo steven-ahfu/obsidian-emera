@@ -16,7 +16,7 @@ export const createEmeraStorage = (plugin: EmeraPlugin) => {
             try {
                 const content = await plugin.app.vault.adapter.read(filePath);
                 state = JSON.parse(content);
-            } catch (err) {
+            } catch (_err) {
                 console.log(`Emera storage file exists, but Emera couldn't read or parse it`);
             }
         }

@@ -32,10 +32,9 @@ export class EmeraPlugin extends Plugin {
         this.isComponentsLoaded = false;
         this.componentsLoadedPromise = promise;
         this.resolveComponentsLoaded = resolve;
-        // @ts-ignore
         window.emera = this;
 
-        this.rootScope = (window as any)[EMERA_ROOT_SCOPE];
+        this.rootScope = (window as unknown as Record<string, ScopeNode>)[EMERA_ROOT_SCOPE];
         populateRootScope(this);
 
         this.codeProcessor = new EmeraCodeProcessor(this);
@@ -103,4 +102,3 @@ export class EmeraPlugin extends Plugin {
         await this.saveData(this.settings);
     }
 }
-
