@@ -25,6 +25,7 @@ data.json
 meta.json
 
 .agents
-.github
-AGENTS.md
-.agents/docs/
+.github/
+# Local environment overrides (keep vault paths and local secrets out of git)
+.env.local
+.env.*.local

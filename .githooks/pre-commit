@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -eu
+
+echo "[emera pre-commit] Running lint and tests..."
+yarn lint
+yarn test

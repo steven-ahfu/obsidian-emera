@@ -1,4 +1,4 @@
-import { rollup, type Plugin as RollupPlugin } from '@rollup/browser';
+import { rollup, type OutputChunk, type Plugin as RollupPlugin } from '@rollup/browser';
 import { normalizePath, Notice } from 'obsidian';
 import * as Babel from '@babel/standalone';
 import { ReactNode } from 'react';
@@ -35,6 +35,28 @@ function resolvePath(base: string, relative: string) {
         else stack.push(parts[i]);
     }
     return stack.join('/');
+}
+
+const EMERA_VAULT_MODULE_PREFIX = 'emera://vault/';
+export const EMERA_DEBUG_LOG_PATH = '.obsidian/plugins/emera/last-error.json';
+const ROLLUP_WASM_FILE_PATH = '.obsidian/plugins/emera/bindings_wasm_bg.wasm';
+const MAX_DEBUG_EVENTS = 5000;
+const RUNTIME_EXTERNAL_IMPORT_PREFIXES = ['http://', 'https://'];
+
+function isRuntimeExternalImport(moduleId: string): boolean {
+    return RUNTIME_EXTERNAL_IMPORT_PREFIXES.some((prefix) => moduleId.startsWith(prefix));
+}
+
+function toVaultModuleId(vaultPath: string): string {
+    const normalized = normalizePath(vaultPath).replace(/^\/+/, '');
+    return `${EMERA_VAULT_MODULE_PREFIX}${normalized}`;
+}
+
+function fromVaultModuleId(moduleId: string): string {
+    if (!moduleId.startsWith(EMERA_VAULT_MODULE_PREFIX)) {
+        return moduleId;
+    }
+    return moduleId.slice(EMERA_VAULT_MODULE_PREFIX.length);
 }
 
 function importRewriter() {
@@ -326,6 +348,216 @@ type TranspileCodeOptions = {
     scope?: ScopeNode;
 };
 
+type DebugRecorder = (stage: string, data?: unknown) => void;
+
+export type LoadTrigger = 'startup' | 'refresh' | 'auto-refresh';
+
+function truncateString(value: string, maxLength = 2000): string {
+    if (value.length <= maxLength) {
+        return value;
+    }
+    return `${value.slice(0, maxLength)}… [truncated ${value.length - maxLength} chars]`;
+}
+
+function toSerializable(value: unknown, depth = 0): unknown {
+    if (depth > 5) {
+        return '[MaxDepth]';
+    }
+
+    if (value == null || typeof value === 'number' || typeof value === 'boolean') {
+        return value;
+    }
+
+    if (typeof value === 'string') {
+        return truncateString(value);
+    }
+
+    if (typeof value === 'function') {
+        return `[Function ${value.name || 'anonymous'}]`;
+    }
+
+    if (value instanceof Error) {
+        const errorRecord: Record<string, unknown> = {
+            name: value.name,
+            message: value.message,
+            stack: truncateString(value.stack ?? ''),
+        };
+        const cause = (value as Error & { cause?: unknown }).cause;
+        if (cause !== undefined) {
+            errorRecord.cause = toSerializable(cause, depth + 1);
+        }
+        return errorRecord;
+    }
+
+    if (Array.isArray(value)) {
+        return value.slice(0, 200).map((item) => toSerializable(item, depth + 1));
+    }
+
+    if (typeof value === 'object') {
+        const entries = Object.entries(value as Record<string, unknown>).slice(0, 200);
+        const record: Record<string, unknown> = {};
+        for (const [key, val] of entries) {
+            record[key] = toSerializable(val, depth + 1);
+        }
+        return record;
+    }
+
+    return String(value);
+}
+
+function createDebugRecorder(
+    trace: Array<{ at: string; stage: string; data: unknown }>,
+): DebugRecorder {
+    return (stage: string, data: unknown = {}) => {
+        if (trace.length >= MAX_DEBUG_EVENTS) {
+            return;
+        }
+        trace.push({
+            at: new Date().toISOString(),
+            stage,
+            data: toSerializable(data),
+        });
+    };
+}
+
+const formatErrorForNotice = (error: unknown): string => {
+    if (error instanceof Error) {
+        return error.message || error.toString();
+    }
+
+    if (typeof error === 'string') {
+        return error;
+    }
+
+    if (error && typeof error === 'object') {
+        const maybeRollup = error as {
+            message?: string;
+            plugin?: string;
+            id?: string;
+            loc?: { line?: number; column?: number; file?: string };
+            frame?: string;
+        };
+
+        const parts: string[] = [];
+        if (maybeRollup.message) parts.push(maybeRollup.message);
+        if (maybeRollup.plugin) parts.push(`plugin: ${maybeRollup.plugin}`);
+        if (maybeRollup.id) parts.push(`file: ${maybeRollup.id}`);
+        if (maybeRollup.loc) {
+            const file = maybeRollup.loc.file ? `${maybeRollup.loc.file}:` : '';
+            const line = maybeRollup.loc.line ?? '?';
+            const column = maybeRollup.loc.column ?? '?';
+            parts.push(`loc: ${file}${line}:${column}`);
+        }
+        if (maybeRollup.frame) {
+            const frameFirstLine = maybeRollup.frame.split('\n')[0];
+            if (frameFirstLine) parts.push(`frame: ${frameFirstLine}`);
+        }
+
+        if (parts.length > 0) {
+            return parts.join(' | ');
+        }
+
+        try {
+            return JSON.stringify(error, Object.getOwnPropertyNames(error), 2);
+        } catch {
+            // no-op
+        }
+    }
+
+    return String(error);
+};
+
+const writeDebugLog = async (
+    plugin: EmeraPlugin,
+    payload: Record<string, unknown>,
+): Promise<string | null> => {
+    try {
+        await plugin.app.vault.adapter.write(
+            EMERA_DEBUG_LOG_PATH,
+            JSON.stringify(payload, null, 2),
+        );
+        return EMERA_DEBUG_LOG_PATH;
+    } catch (writeError) {
+        console.error('[Emera] Failed to write debug error file', writeError);
+        return null;
+    }
+};
+
+const withRollupWasmUrlPatch = async <T>(
+    plugin: EmeraPlugin,
+    recordDebug: DebugRecorder,
+    run: () => Promise<T>,
+): Promise<T> => {
+    const originalURL = globalThis.URL;
+    if (typeof originalURL !== 'function') {
+        recordDebug('bundle.rollup.urlPatch.skipped.noUrlConstructor');
+        return run();
+    }
+
+    const wasmExists = await plugin.app.vault.adapter.exists(ROLLUP_WASM_FILE_PATH);
+    if (!wasmExists) {
+        recordDebug('bundle.rollup.urlPatch.skipped.noWasmFile', {
+            wasmPath: ROLLUP_WASM_FILE_PATH,
+        });
+        throw new Error(
+            `Missing Rollup WASM runtime at "${ROLLUP_WASM_FILE_PATH}". Re-deploy the plugin so "bindings_wasm_bg.wasm" is copied.`,
+        );
+    }
+
+    const wasmBinary = await plugin.app.vault.adapter.readBinary(ROLLUP_WASM_FILE_PATH);
+    const wasmBlobUrl = originalURL.createObjectURL(
+        new Blob([wasmBinary], { type: 'application/wasm' }),
+    );
+
+    recordDebug('bundle.rollup.urlPatch.prepared', {
+        wasmPath: ROLLUP_WASM_FILE_PATH,
+        wasmSize: wasmBinary.byteLength,
+        wasmBlobUrl,
+    });
+
+    class PatchedURL extends originalURL {
+        constructor(url: string | URL, base?: string | URL) {
+            const urlString = typeof url === 'string' ? url : String(url);
+            const isRollupWasmRequest = urlString.endsWith('bindings_wasm_bg.wasm');
+
+            if (isRollupWasmRequest) {
+                try {
+                    super(url, base);
+                    return;
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    if (message.includes('Invalid URL')) {
+                        super(wasmBlobUrl);
+                        return;
+                    }
+                    throw error;
+                }
+            }
+
+            super(url, base);
+        }
+    }
+
+    Object.defineProperty(globalThis, 'URL', {
+        configurable: true,
+        writable: true,
+        value: PatchedURL,
+    });
+    recordDebug('bundle.rollup.urlPatch.enabled');
+
+    try {
+        return await run();
+    } finally {
+        Object.defineProperty(globalThis, 'URL', {
+            configurable: true,
+            writable: true,
+            value: originalURL,
+        });
+        originalURL.revokeObjectURL(wasmBlobUrl);
+        recordDebug('bundle.rollup.urlPatch.restored');
+    }
+};
+
 export const transpileCode = (
     code: string,
     { rewriteImports = true, scope }: TranspileCodeOptions = {},
@@ -364,52 +596,102 @@ export const transpileCode = (
 // @ts-ignore
 window.transpileCode = transpileCode;
 
-const rollupVirtualFsPlugin = (plugin: EmeraPlugin, path: string): RollupPlugin => ({
+const rollupVirtualFsPlugin = (
+    plugin: EmeraPlugin,
+    path: string,
+    recordDebug?: DebugRecorder,
+): RollupPlugin => ({
     name: 'virtualFs',
     async resolveId(source, importer) {
-        if (source === path) {
-            return source;
+        recordDebug?.('rollup.resolveId.call', { source, importer });
+        if (source === path || source === toVaultModuleId(path)) {
+            const moduleId = toVaultModuleId(path);
+            recordDebug?.('rollup.resolveId.entry', { source, moduleId });
+            return moduleId;
+        }
+
+        if (isRuntimeExternalImport(source)) {
+            recordDebug?.('rollup.resolveId.external-runtime-url', { source, importer });
+            return {
+                id: source,
+                external: true,
+            };
         }
 
         if (importer && (source.startsWith('./') || source.startsWith('../'))) {
-            const resolvedPath = resolvePath(importer, source);
+            const importerPath = fromVaultModuleId(importer);
+            const resolvedPath = resolvePath(importerPath, source);
             const extensions = ['.js', '.jsx', '.ts', '.tsx', '.css'];
+            recordDebug?.('rollup.resolveId.relative', { source, importerPath, resolvedPath });
 
             if (extensions.some((ext) => resolvedPath.endsWith(ext))) {
-                return resolvedPath;
+                const exists = await plugin.app.vault.adapter.exists(resolvedPath);
+                recordDebug?.('rollup.resolveId.check', { candidate: resolvedPath, exists });
+                if (exists) {
+                    const resolvedModuleId = toVaultModuleId(resolvedPath);
+                    recordDebug?.('rollup.resolveId.hit', {
+                        source,
+                        importerPath,
+                        resolvedPath,
+                        resolvedModuleId,
+                    });
+                    return resolvedModuleId;
+                }
             }
 
             for (const ext of extensions) {
                 const pathWithExt = `${resolvedPath}${ext}`;
                 const exists = await plugin.app.vault.adapter.exists(pathWithExt);
+                recordDebug?.('rollup.resolveId.check', { candidate: pathWithExt, exists });
                 if (exists) {
-                    return pathWithExt;
+                    const resolvedModuleId = toVaultModuleId(pathWithExt);
+                    recordDebug?.('rollup.resolveId.hit', {
+                        source,
+                        importerPath,
+                        resolvedPath: pathWithExt,
+                        resolvedModuleId,
+                    });
+                    return resolvedModuleId;
                 }
             }
+
+            recordDebug?.('rollup.resolveId.miss', { source, importerPath, resolvedPath });
+            throw new Error(
+                `Unable to resolve import "${source}" from "${importerPath}". Tried "${resolvedPath}" and ${extensions
+                    .map((ext) => `"${resolvedPath}${ext}"`)
+                    .join(', ')}.`,
+            );
         }
 
+        recordDebug?.('rollup.resolveId.external-or-unhandled', { source, importer });
         return null;
     },
     async load(id) {
-        const exists = await plugin.app.vault.adapter.exists(id);
+        const vaultPath = fromVaultModuleId(id);
+        const exists = await plugin.app.vault.adapter.exists(vaultPath);
+        recordDebug?.('rollup.load', { id, vaultPath, exists });
         if (!exists) {
             return null;
         }
-        return plugin.app.vault.adapter.read(id);
+        const content = await plugin.app.vault.adapter.read(vaultPath);
+        recordDebug?.('rollup.load.success', { id, vaultPath, contentLength: content.length });
+        return content;
     },
 });
 
-const rollupBabelPlugin = (_plugin: EmeraPlugin): RollupPlugin => ({
+const rollupBabelPlugin = (_plugin: EmeraPlugin, recordDebug?: DebugRecorder): RollupPlugin => ({
     name: 'babel-plugin',
-    transform(code, _id) {
+    transform(code, id) {
+        recordDebug?.('rollup.transform.babel', { id, inputLength: code.length });
         return { code: transpileCode(code) };
     },
 });
 
-const rollupCssPlugin = (_plugin: EmeraPlugin): RollupPlugin => ({
+const rollupCssPlugin = (_plugin: EmeraPlugin, recordDebug?: DebugRecorder): RollupPlugin => ({
     name: 'emera-styles',
     transform(code, id) {
         if (!id.endsWith('.css')) return;
+        recordDebug?.('rollup.transform.css', { id, inputLength: code.length });
 
         const injectionCode = `
           (function() {
@@ -423,29 +705,115 @@ const rollupCssPlugin = (_plugin: EmeraPlugin): RollupPlugin => ({
     },
 });
 
-export const bundleFile = async (plugin: EmeraPlugin, path: string) => {
+export const bundleFile = async (
+    plugin: EmeraPlugin,
+    path: string,
+    recordDebug?: DebugRecorder,
+) => {
+    const debug = recordDebug ?? (() => undefined);
     console.log('Bundling', path);
-    const bundle = await rollup({
-        input: path,
-        plugins: [
-            rollupVirtualFsPlugin(plugin, path),
-            rollupCssPlugin(plugin),
-            rollupBabelPlugin(plugin),
-        ],
+    const entryId = toVaultModuleId(path);
+    debug('bundle.start', { path, entryId });
+
+    const bundle = await withRollupWasmUrlPatch(plugin, debug, () =>
+        rollup({
+            input: entryId,
+            plugins: [
+                rollupVirtualFsPlugin(plugin, path, recordDebug),
+                rollupCssPlugin(plugin, recordDebug),
+                rollupBabelPlugin(plugin, recordDebug),
+            ],
+        }),
+    );
+    debug('bundle.rollup.created', { path, entryId });
+
+    const { output } = await bundle.generate({
+        format: 'es',
+        // Keep a single module string so runtime import works from Blob URL.
+        inlineDynamicImports: true,
     });
-    const { output } = await bundle.generate({ format: 'es' });
-    // console.log('Bundled code');
-    // console.log(output[0].code);
+    debug('bundle.generate.done', {
+        outputCount: output.length,
+        outputTypes: output.map((file) => file.type),
+    });
+
+    const chunks = output.filter((file): file is OutputChunk => file.type === 'chunk');
+    if (chunks.length !== 1) {
+        debug('bundle.error.chunk-count', { chunksLength: chunks.length });
+        throw new Error(`Expected a single bundled chunk for "${path}", but got ${chunks.length}.`);
+    }
+
+    const [entryChunk] = chunks;
+    debug('bundle.chunk.entry', {
+        fileName: entryChunk.fileName,
+        codeLength: entryChunk.code.length,
+        imports: entryChunk.imports,
+        dynamicImports: entryChunk.dynamicImports,
+    });
+    const unresolvedImports = entryChunk.imports.filter((moduleId) => !isRuntimeExternalImport(moduleId));
+    const unresolvedDynamicImports = entryChunk.dynamicImports.filter(
+        (moduleId) => !isRuntimeExternalImport(moduleId),
+    );
+
+    if (entryChunk.imports.length > 0 || entryChunk.dynamicImports.length > 0) {
+        debug('bundle.chunk.runtime-imports', {
+            imports: entryChunk.imports,
+            dynamicImports: entryChunk.dynamicImports,
+            unresolvedImports,
+            unresolvedDynamicImports,
+        });
+    }
+
+    if (unresolvedImports.length > 0 || unresolvedDynamicImports.length > 0) {
+        debug('bundle.error.chunk-imports', {
+            imports: unresolvedImports,
+            dynamicImports: unresolvedDynamicImports,
+        });
+        throw new Error(
+            `Bundled chunk still contains unresolved imports (imports: ${
+                unresolvedImports.join(', ') || 'none'
+            }, dynamicImports: ${
+                unresolvedDynamicImports.join(', ') || 'none'
+            }).`,
+        );
+    }
+
     await bundle.close();
-    return output[0].code;
+    debug('bundle.complete', { codeLength: entryChunk.code.length });
+    return entryChunk.code;
 };
 
-export const importFromString = (code: string, ignoreCache = true) => {
+export const importFromString = async (
+    code: string,
+    ignoreCache = true,
+    recordDebug?: DebugRecorder,
+) => {
+    recordDebug?.('importFromString.start', { ignoreCache, inputLength: code.length });
     if (ignoreCache) {
         code = `// Cache buster: ${Math.random()}\n\n` + code;
+        recordDebug?.('importFromString.cache-busted', { outputLength: code.length });
     }
-    const encodedCode = `data:text/javascript;charset=utf-8,${encodeURIComponent(code)}`;
-    return import(encodedCode);
+
+    // Blob URLs are resilient for large generated modules and avoid data URL length limits.
+    const blob = new Blob([code], { type: 'text/javascript' });
+    recordDebug?.('importFromString.blob-created', { size: blob.size, type: blob.type });
+    const blobUrl = URL.createObjectURL(blob);
+    recordDebug?.('importFromString.blob-url', { blobUrl });
+    try {
+        const imported = await import(blobUrl);
+        recordDebug?.('importFromString.success', {
+            exportKeys: Object.keys(imported).slice(0, 100),
+            exportCount: Object.keys(imported).length,
+        });
+        return imported;
+    } catch (error) {
+        recordDebug?.('importFromString.error', { error: toSerializable(error) });
+        console.error('[Emera] Failed to import generated module from Blob URL', error);
+        throw error;
+    } finally {
+        URL.revokeObjectURL(blobUrl);
+        recordDebug?.('importFromString.blob-url-revoked', { blobUrl });
+    }
 };
 
 export const compileJsxIntoFactory = async (
@@ -467,29 +835,176 @@ export const compileJsxIntoFactory = async (
     return factory;
 };
 
-export const loadUserModule = async (plugin: EmeraPlugin): Promise<Record<string, any>> => {
+export type LoadUserModuleResult = {
+    registry: Record<string, any>;
+    ok: boolean;
+};
+
+export const loadUserModule = async (
+    plugin: EmeraPlugin,
+    trigger: LoadTrigger = 'refresh',
+): Promise<LoadUserModuleResult> => {
+    const timeline: Array<{ at: string; stage: string; data: unknown }> = [];
+    const recordDebug = createDebugRecorder(timeline);
+
+    const finalize = async ({
+        ok,
+        phase,
+        error,
+        context,
+        registry,
+    }: {
+        ok: boolean;
+        phase: 'bundle' | 'import' | 'success';
+        error?: unknown;
+        context: Record<string, unknown>;
+        registry: Record<string, unknown>;
+    }): Promise<LoadUserModuleResult & { debugPath: string | null }> => {
+        const errorText = error ? formatErrorForNotice(error) : null;
+        const errorStack =
+            error instanceof Error
+                ? truncateString(error.stack ?? '')
+                : error &&
+                    typeof error === 'object' &&
+                    'stack' in (error as Record<string, unknown>)
+                  ? toSerializable((error as Record<string, unknown>).stack)
+                  : null;
+
+        const debugPath = await writeDebugLog(plugin, {
+            phase,
+            trigger,
+            ok,
+            occurredAt: new Date().toISOString(),
+            errorText,
+            errorStack,
+            error: error ? toSerializable(error) : null,
+            context: toSerializable(context),
+            timeline,
+        });
+
+        return {
+            registry,
+            ok,
+            debugPath,
+        };
+    };
+
+    recordDebug('loadUserModule.start', {
+        trigger,
+        componentsFolder: plugin.settings.componentsFolder,
+        pluginVersion: plugin.manifest.version,
+    });
+
     const extensions = ['js', 'jsx', 'ts', 'tsx'];
     let indexFile: string | null = null;
     for (const ext of extensions) {
         const path = normalizePath(`${plugin.settings.componentsFolder}/index.${ext}`);
         const exists = await plugin.app.vault.adapter.exists(path);
+        recordDebug('loadUserModule.indexCandidate', { path, exists });
         if (exists) {
             indexFile = path;
             break;
         }
     }
+
     if (!indexFile) {
-        console.log('Index file not found');
-        return {};
+        const error = new Error(
+            `Index file not found in "${plugin.settings.componentsFolder}" (tried: ${extensions
+                .map((ext) => `index.${ext}`)
+                .join(', ')})`,
+        );
+        recordDebug('loadUserModule.error.noIndex', { error: toSerializable(error) });
+        const { registry, ok, debugPath } = await finalize({
+            ok: false,
+            phase: 'bundle',
+            error,
+            context: {
+                componentsFolder: plugin.settings.componentsFolder,
+                attemptedExtensions: extensions,
+            },
+            registry: {},
+        });
+        new Notice('Error happened while bundling components: ' + error.message);
+        if (debugPath) {
+            new Notice(`Emera debug details written to ${debugPath}`);
+        }
+        return { registry, ok };
     }
+
+    recordDebug('loadUserModule.indexSelected', { indexFile });
     console.log('Loading index file', indexFile);
 
+    let bundledCode = '';
     try {
-        const bundledCode = await bundleFile(plugin, indexFile);
-        const registry = await importFromString(bundledCode);
-        return registry;
+        bundledCode = await bundleFile(plugin, indexFile, recordDebug);
+        recordDebug('loadUserModule.bundleSuccess', { bundledCodeLength: bundledCode.length });
     } catch (err) {
-        new Notice('Error happened while loading components: ' + err.toString());
-        return {};
+        recordDebug('loadUserModule.bundleError', { error: toSerializable(err) });
+        const { registry, ok, debugPath } = await finalize({
+            ok: false,
+            phase: 'bundle',
+            error: err,
+            context: {
+                indexFile,
+            },
+            registry: {},
+        });
+        const details = formatErrorForNotice(err);
+        console.error('[Emera] Failed to bundle user module', {
+            indexFile,
+            error: err,
+        });
+        new Notice('Error happened while bundling components: ' + details);
+        if (debugPath) {
+            new Notice(`Emera debug details written to ${debugPath}`);
+        }
+        return { registry, ok };
+    }
+
+    try {
+        const registry = await importFromString(bundledCode, true, recordDebug);
+        recordDebug('loadUserModule.importSuccess', {
+            exportCount: Object.keys(registry).length,
+            exportKeysPreview: Object.keys(registry).slice(0, 100),
+        });
+        const result = await finalize({
+            ok: true,
+            phase: 'success',
+            context: {
+                indexFile,
+                bundledCodeLength: bundledCode.length,
+                exportCount: Object.keys(registry).length,
+            },
+            registry,
+        });
+        return {
+            registry: result.registry,
+            ok: result.ok,
+        };
+    } catch (err) {
+        recordDebug('loadUserModule.importError', { error: toSerializable(err) });
+        const { registry, ok, debugPath } = await finalize({
+            ok: false,
+            phase: 'import',
+            error: err,
+            context: {
+                indexFile,
+                bundledCodeLength: bundledCode.length,
+                bundledCodePreview: bundledCode.slice(0, 1200),
+            },
+            registry: {},
+        });
+        const details = formatErrorForNotice(err);
+        console.error('[Emera] Failed to import bundled user module', {
+            indexFile,
+            bundledCodeLength: bundledCode.length,
+            bundledCodePreview: bundledCode.slice(0, 800),
+            error: err,
+        });
+        new Notice('Error happened while loading components: ' + details);
+        if (debugPath) {
+            new Notice(`Emera debug details written to ${debugPath}`);
+        }
+        return { registry, ok };
     }
 };
