@@ -119,6 +119,7 @@ export class EmeraCodeProcessor {
                 plugin: this.plugin,
                 context: {
                     file: ctx.file,
+                    renderMode: 'reading' as const,
                 },
             });
 
@@ -136,6 +137,7 @@ export class EmeraCodeProcessor {
                 plugin: this.plugin,
                 context: {
                     file: ctx.file,
+                    renderMode: 'reading' as const,
                 },
             });
         } catch (err) {
@@ -158,6 +160,7 @@ export class EmeraCodeProcessor {
             plugin: this.plugin,
             context: {
                 file: ctx.file,
+                renderMode: 'reading' as const,
             },
         });
 
@@ -177,6 +180,7 @@ export class EmeraCodeProcessor {
                 plugin: this.plugin,
                 context: {
                     file: ctx.file,
+                    renderMode: 'reading' as const,
                 },
             });
         } finally {
@@ -203,6 +207,7 @@ export class EmeraCodeProcessor {
                         plugin: this.plugin,
                         context: {
                             file: ctx.file,
+                            renderMode: 'reading' as const,
                         },
                     });
                 }
@@ -219,6 +224,7 @@ export class EmeraCodeProcessor {
                         children: ctx.shortcutComponent ? content : undefined,
                         context: {
                             file: ctx.file,
+                            renderMode: 'reading' as const,
                         },
                     });
                 } else {
@@ -231,6 +237,7 @@ export class EmeraCodeProcessor {
                         children: ctx.shortcutComponent ? content : undefined,
                         context: {
                             file: ctx.file,
+                            renderMode: 'reading' as const,
                         },
                     });
                 }
@@ -245,6 +252,7 @@ export class EmeraCodeProcessor {
                     plugin: this.plugin,
                     context: {
                         file: ctx.file,
+                        renderMode: 'reading' as const,
                     },
                 });
             }
@@ -255,6 +263,7 @@ export class EmeraCodeProcessor {
                 plugin: this.plugin,
                 context: {
                     file: ctx.file,
+                    renderMode: 'reading' as const,
                 },
             });
         }
@@ -351,6 +360,7 @@ export class EmeraCodeProcessor {
                                 shortcutComponent: el.shortcutComponent,
                                 readScope,
                                 writeScope,
+                                renderMode: 'reading' as const,
                             };
 
                             const replacement = document.createElement(
@@ -713,6 +723,7 @@ export class EmeraCodeProcessor {
                     shortcutComponent: el.shortcutComponent,
                     readScope,
                     writeScope,
+                    renderMode: 'editing' as const,
                 } as const;
                 // TODO: it will be good to re-use React roots so widgets will be able to preserve state between renders
                 const widget = iife(() => {

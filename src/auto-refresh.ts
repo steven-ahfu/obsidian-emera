@@ -1,18 +1,12 @@
+import { normalizeComponentsFolders, normalizeComponentsFolderValue } from './components-folder';
+
 const AUTO_REFRESH_FILE_EXTENSIONS = ['.js', '.jsx', '.ts', '.tsx', '.css'] as const;
 
 type ShouldAutoRefreshForPathParams = {
     path: string;
-    componentsFolder: string;
+    componentsFolders: string[];
     autoRefreshEnabled: boolean;
     isFilesLoaded: boolean;
-};
-
-const normalizeSlashPath = (value: string) => {
-    return value
-        .replace(/\\/g, '/')
-        .replace(/\/{2,}/g, '/')
-        .replace(/^\.\//, '')
-        .replace(/\/+$/, '');
 };
 
 export const normalizeAutoRefreshDebounceMs = (value: number, fallbackMs: number) => {
@@ -25,7 +19,7 @@ export const normalizeAutoRefreshDebounceMs = (value: number, fallbackMs: number
 
 export const shouldAutoRefreshForPath = ({
     path,
-    componentsFolder,
+    componentsFolders,
     autoRefreshEnabled,
     isFilesLoaded,
 }: ShouldAutoRefreshForPathParams): boolean => {
@@ -33,23 +27,27 @@ export const shouldAutoRefreshForPath = ({
         return false;
     }
 
-    const normalizedPath = normalizeSlashPath(path);
-    const normalizedComponentsFolder = normalizeSlashPath(componentsFolder);
-    if (!normalizedComponentsFolder) {
+    const normalizedPath = normalizeComponentsFolderValue(path);
+    const normalizedComponentsFolders = normalizeComponentsFolders(componentsFolders);
+    if (normalizedComponentsFolders.length === 0) {
         return false;
     }
 
-    const fileInComponentsFolder =
-        normalizedPath === normalizedComponentsFolder ||
-        normalizedPath.startsWith(`${normalizedComponentsFolder}/`);
-    if (!fileInComponentsFolder) {
-        return false;
+    for (const normalizedComponentsFolder of normalizedComponentsFolders) {
+        const fileInComponentsFolder =
+            normalizedPath === normalizedComponentsFolder ||
+            normalizedPath.startsWith(`${normalizedComponentsFolder}/`);
+        if (!fileInComponentsFolder) {
+            continue;
+        }
+
+        const storageFilePath = `${normalizedComponentsFolder}/storage.json`;
+        if (normalizedPath === storageFilePath) {
+            return false;
+        }
+
+        return AUTO_REFRESH_FILE_EXTENSIONS.some((ext) => normalizedPath.endsWith(ext));
     }
 
-    const storageFilePath = `${normalizedComponentsFolder}/storage.json`;
-    if (normalizedPath === storageFilePath) {
-        return false;
-    }
-
-    return AUTO_REFRESH_FILE_EXTENSIONS.some((ext) => normalizedPath.endsWith(ext));
+    return false;
 };

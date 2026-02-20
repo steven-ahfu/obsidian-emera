@@ -1,8 +1,30 @@
-import { ComponentType, createElement, ReactNode } from 'react';
+import { ComponentType, createElement, ReactNode, useEffect, useState } from 'react';
 import { EmeraContextProvider, EmeraContextType } from './emera-module/context';
+import { ScopeNode, getPageScope } from './scope';
 import { createRoot, Root } from 'react-dom/client';
 import type { EmeraPlugin } from './plugin';
 import { ErrorBoundary } from './components/ErrorBoundary';
+
+type ScopeChangeWatcherProps = {
+    scope?: ScopeNode;
+    children?: ReactNode;
+};
+
+const ScopeChangeWatcher = ({ scope, children }: ScopeChangeWatcherProps) => {
+    const [, setTick] = useState(0);
+
+    useEffect(() => {
+        if (!scope) return;
+        const unsub = scope.onChange(() => {
+            setTick((prev) => prev + 1);
+        });
+        return () => {
+            unsub();
+        };
+    }, [scope]);
+
+    return children ?? null;
+};
 
 export type RenderComponentParams<P extends Record<string, any>> = {
     container: Element | Root;
@@ -42,6 +64,7 @@ export const renderComponent = <P extends Record<string, any>>({
     const frontmatter = context.file
         ? plugin.app.metadataCache.getFileCache(context.file)?.frontmatter
         : undefined;
+    const pageScope = context.file ? getPageScope(plugin, context.file) : undefined;
     root.render(
         createElement(
             EmeraContextProvider,
@@ -54,7 +77,11 @@ export const renderComponent = <P extends Record<string, any>>({
                     frontmatter,
                 },
             },
-            createElement(ErrorBoundary, {}, createElement(component, props, children)),
+            createElement(
+                ScopeChangeWatcher,
+                { scope: pageScope },
+                createElement(ErrorBoundary, {}, createElement(component, props, children)),
+            ),
         ),
     );
 

@@ -18,7 +18,7 @@ describe('shouldAutoRefreshForPath', () => {
         expect(
             shouldAutoRefreshForPath({
                 path: 'Components/index.tsx',
-                componentsFolder: 'Components',
+                componentsFolders: ['Components'],
                 autoRefreshEnabled: false,
                 isFilesLoaded: true,
             }),
@@ -27,7 +27,7 @@ describe('shouldAutoRefreshForPath', () => {
         expect(
             shouldAutoRefreshForPath({
                 path: 'Components/index.tsx',
-                componentsFolder: 'Components',
+                componentsFolders: ['Components'],
                 autoRefreshEnabled: true,
                 isFilesLoaded: false,
             }),
@@ -38,7 +38,7 @@ describe('shouldAutoRefreshForPath', () => {
         expect(
             shouldAutoRefreshForPath({
                 path: 'Components/index.tsx',
-                componentsFolder: 'Components',
+                componentsFolders: ['Components'],
                 autoRefreshEnabled: true,
                 isFilesLoaded: true,
             }),
@@ -47,7 +47,16 @@ describe('shouldAutoRefreshForPath', () => {
         expect(
             shouldAutoRefreshForPath({
                 path: 'Components/widgets/chart.css',
-                componentsFolder: 'Components/',
+                componentsFolders: ['Components/'],
+                autoRefreshEnabled: true,
+                isFilesLoaded: true,
+            }),
+        ).toBe(true);
+
+        expect(
+            shouldAutoRefreshForPath({
+                path: 'Secondary/index.tsx',
+                componentsFolders: ['Components', 'Secondary'],
                 autoRefreshEnabled: true,
                 isFilesLoaded: true,
             }),
@@ -58,7 +67,7 @@ describe('shouldAutoRefreshForPath', () => {
         expect(
             shouldAutoRefreshForPath({
                 path: 'Components/readme.md',
-                componentsFolder: 'Components',
+                componentsFolders: ['Components'],
                 autoRefreshEnabled: true,
                 isFilesLoaded: true,
             }),
@@ -67,7 +76,7 @@ describe('shouldAutoRefreshForPath', () => {
         expect(
             shouldAutoRefreshForPath({
                 path: 'Other/index.tsx',
-                componentsFolder: 'Components',
+                componentsFolders: ['Components'],
                 autoRefreshEnabled: true,
                 isFilesLoaded: true,
             }),
@@ -78,7 +87,16 @@ describe('shouldAutoRefreshForPath', () => {
         expect(
             shouldAutoRefreshForPath({
                 path: 'Components/storage.json',
-                componentsFolder: 'Components',
+                componentsFolders: ['Components'],
+                autoRefreshEnabled: true,
+                isFilesLoaded: true,
+            }),
+        ).toBe(false);
+
+        expect(
+            shouldAutoRefreshForPath({
+                path: 'Secondary/storage.json',
+                componentsFolders: ['Components', 'Secondary'],
                 autoRefreshEnabled: true,
                 isFilesLoaded: true,
             }),
