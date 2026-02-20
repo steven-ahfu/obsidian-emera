@@ -750,7 +750,7 @@ export class EmeraCodeProcessor {
         return StateField.define<PluginState>({
             create(state): PluginState {
                 const initialState = processCodeblocks({ editorState: state });
-                this.logger.debug('Code processor initial state', {
+                parent.logger.debug('Code processor initial state', {
                     cacheLength: initialState.cache.length,
                 });
                 return initialState;
