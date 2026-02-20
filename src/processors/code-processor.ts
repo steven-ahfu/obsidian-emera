@@ -30,6 +30,7 @@ import { ErrorAlert } from '../components/ErrorBoundary';
 import { EmptyBlock } from '../components/EmptyBlock';
 import { JsBlockPlaceholder } from '../components/JsBlockPlaceholder';
 import { RootComponent } from 'src/components/RootComponent';
+import { createLogger } from '../logger';
 
 type ProcessorContext = {
     file: TFile | null;
@@ -67,9 +68,11 @@ type ProcessFunction = (wrapper: HTMLElement, content: string, ctx: ProcessorCon
 
 export class EmeraCodeProcessor {
     public plugin: EmeraPlugin;
+    private logger: ReturnType<typeof createLogger>;
 
     constructor(plugin: EmeraPlugin) {
         this.plugin = plugin;
+        this.logger = createLogger(plugin, 'code-processor');
     }
 
     processInlineJs: ProcessFunction = async (
@@ -94,7 +97,7 @@ export class EmeraCodeProcessor {
             const module = await importFromString(transpiled);
             evaluated = await module.default();
         } catch (err) {
-            console.error(err);
+            this.logger.error('Inline JS evaluation failed', err);
             evaluated = `❗️${err.toString()}`;
         }
 
@@ -136,7 +139,7 @@ export class EmeraCodeProcessor {
                 },
             });
         } catch (err) {
-            console.error(err);
+            this.logger.error('Inline JSX rendering failed', err);
             wrapper.textContent = `❗️${err.toString()}`;
         }
     };
@@ -232,7 +235,7 @@ export class EmeraCodeProcessor {
                     });
                 }
             } catch (err) {
-                console.error(err);
+                this.logger.error('Block JSX rendering failed', err);
                 renderComponent({
                     component: ErrorAlert,
                     props: {
@@ -309,18 +312,23 @@ export class EmeraCodeProcessor {
         const processQueue = async () => {
             if (isProcessing) return;
             isProcessing = true;
-            console.log('Starting queue processing');
+            this.logger.debug('Starting preview queue processing');
             try {
                 while (Object.keys(queueMap).length > 0) {
                     const entries = Object.entries(queueMap);
                     for (const [key, { file, queue }] of entries) {
                         delete queueMap[key];
-                        console.log('[PREVIEW] Will process elements', queue);
+                        this.logger.debug('Preview queue batch', {
+                            docId: key,
+                            queueLength: queue.length,
+                        });
                         const startScope = file
                             ? getPageScope(this.plugin, file)
                             : getAnonymousDocScope(this.plugin, key);
                         await startScope.waitForUnblock();
-                        console.log('[PREVIEW] Disposing page scope descendants');
+                        this.logger.debug('Disposing preview scope descendants', {
+                            scopeId: startScope.id,
+                        });
                         startScope.disposeDescendants();
 
                         let readScope = startScope;
@@ -394,7 +402,7 @@ export class EmeraCodeProcessor {
                 const content = el.textContent ?? '';
                 if (el.parentElement?.tagName.toLowerCase() === 'pre') {
                     // Multi-line code block
-                    console.log('Process el', el.className);
+                    this.logger.debug('Processing preview code block', { className: el.className });
                     if (
                         el.className.includes(`language-${EMERA_JSX_LANG_NAME}`) ||
                         el.className.includes(`language-${EMERA_JSX_SHORTHAND_LANG_NAME}`)
@@ -404,7 +412,10 @@ export class EmeraCodeProcessor {
                         );
                         const match = regex.exec(el.className);
                         const componentSpecifier = match?.[1];
-                        console.log('Process el', el.className, 'match', match);
+                        this.logger.debug('Detected JSX shorthand component', {
+                            className: el.className,
+                            componentSpecifier,
+                        });
                         return [
                             {
                                 type: 'block-jsx',
@@ -460,7 +471,10 @@ export class EmeraCodeProcessor {
             }
             queueMap[ctx.docId].queue.push(...toProcess);
             setTimeout(() => processQueue(), 10);
-            console.log('Scheduled queue processing');
+            this.logger.debug('Scheduled preview queue processing', {
+                docId: ctx.docId,
+                queued: queueMap[ctx.docId].queue.length,
+            });
         };
     });
 
@@ -499,7 +513,7 @@ export class EmeraCodeProcessor {
 
             const editor = state.field(editorEditorField);
             if (!editor) {
-                console.log(`[EDITOR] Can't get editor view, skipping`);
+                this.logger.debug(`Can't get editor view, skipping`);
                 return {
                     decorations: builder.finish(),
                     cache: [],
@@ -509,9 +523,9 @@ export class EmeraCodeProcessor {
             // Kind of hacky, officially editorInfoField contains MarkdownFileInfo, which is limited
             // subset of MarkdownView, but in fact this state field contains full MarkdownView
             const mdView = state.field(editorInfoField) as MarkdownView | null;
-            console.log('[EDITOR] Current view', mdView);
+            this.logger.debug('Current editor view state', { hasView: Boolean(mdView) });
             if (!mdView) {
-                console.log(`[EDITOR] Can't find current view, skipping`);
+                this.logger.debug(`Can't find current view, skipping`);
                 return {
                     decorations: builder.finish(),
                     cache: [],
@@ -521,7 +535,7 @@ export class EmeraCodeProcessor {
             const isLivePreview = state.field(editorLivePreviewField);
             // We care only about LivePreview, don't do anything in Source mode
             if (!isLivePreview) {
-                console.log(`[EDITOR] Editor in source mode, skipping`);
+                this.logger.debug(`Editor in source mode, skipping`);
                 return {
                     decorations: builder.finish(),
                     cache: [],
@@ -530,7 +544,7 @@ export class EmeraCodeProcessor {
 
             const file = mdView.file;
             if (!file) {
-                console.log(`[EDITOR] Couldn't find file, skipping`);
+                this.logger.debug(`Couldn't find file, skipping`);
                 return {
                     decorations: builder.finish(),
                     cache: [],
@@ -621,7 +635,7 @@ export class EmeraCodeProcessor {
                 };
             }
 
-            console.log('[EDITOR] Will process nodes', toProcess);
+            this.logger.debug('Will process editor nodes', { count: toProcess.length });
             const pageScope = getPageScope(parent.plugin, file);
             // console.log('[EDITOR] Disposing page scope descendants', pageScope.id);
             // pageScope.disposeDescendants();
@@ -631,8 +645,10 @@ export class EmeraCodeProcessor {
             let shouldReevaluate = false;
             let readScope = pageScope;
 
-            console.log('Old cache', oldState.cache);
-            console.log('To Process', toProcess);
+            this.logger.debug('Editor cache state', {
+                oldCacheLength: oldState.cache.length,
+                toProcessLength: toProcess.length,
+            });
             toProcess.forEach((el, index) => {
                 const cacheEntry = oldState.cache[index];
                 if (el.cursorInside) {
@@ -659,14 +675,12 @@ export class EmeraCodeProcessor {
                     return randomKey;
                 });
 
-                console.log(
-                    'Record',
+                this.logger.debug('Prepared render record', {
                     index,
-                    el.type,
-                    'render key',
+                    type: el.type,
                     renderKey,
-                    `(old key ${cacheEntry?.key})`,
-                );
+                    oldKey: cacheEntry?.key,
+                });
 
                 cache.push({
                     type: el.type,
@@ -717,12 +731,16 @@ export class EmeraCodeProcessor {
                     0,
                 );
                 const decorationEnd = isInline ? el.endNode.to : el.endNode.to + 1;
-                console.log('[EDITOR] Adding decoration', decorationStart, decorationEnd, widget);
+                this.logger.debug('Adding editor decoration', {
+                    decorationStart,
+                    decorationEnd,
+                    type: el.type,
+                });
                 builder.add(decorationStart, decorationEnd, Decoration.replace({ widget }));
                 readScope = writeScope;
             });
 
-            console.log('New cache', cache);
+            this.logger.debug('Built new editor cache', { cacheLength: cache.length });
             return {
                 decorations: builder.finish(),
                 cache,
@@ -732,7 +750,9 @@ export class EmeraCodeProcessor {
         return StateField.define<PluginState>({
             create(state): PluginState {
                 const initialState = processCodeblocks({ editorState: state });
-                console.log('Code processor initial state', initialState);
+                this.logger.debug('Code processor initial state', {
+                    cacheLength: initialState.cache.length,
+                });
                 return initialState;
             },
 
