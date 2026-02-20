@@ -79,6 +79,18 @@ export class SettingTab extends PluginSettingTab {
                         await this.plugin.saveSettings();
                     }),
             );
+
+        new Setting(containerEl)
+            .setName('Verbose debug logging')
+            .setDesc('When enabled, Emera logs detailed diagnostics to developer console')
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.debugLoggingEnabled)
+                    .onChange(async (value) => {
+                        this.plugin.settings.debugLoggingEnabled = value;
+                        await this.plugin.saveSettings();
+                    }),
+            );
     }
 }
 

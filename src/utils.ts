@@ -2,7 +2,7 @@ export const safeCall = (cb: VoidFunction) => {
     try {
         cb();
     } catch (err) {
-        console.log(err);
+        console.error('[Emera] safeCall failed', err);
     }
 };
 

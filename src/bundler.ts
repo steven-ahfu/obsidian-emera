@@ -5,6 +5,7 @@ import { ReactNode } from 'react';
 import type { EmeraPlugin } from './plugin';
 import { EMERA_GET_SCOPE, EMERA_MODULES } from './consts';
 import { getScope, ScopeNode } from './scope';
+import { createLogger } from './logger';
 
 // @ts-ignore not included in package types, but it's there!
 const t = Babel.packages.types;
@@ -471,6 +472,7 @@ const writeDebugLog = async (
     plugin: EmeraPlugin,
     payload: Record<string, unknown>,
 ): Promise<string | null> => {
+    const logger = createLogger(plugin, 'bundler');
     try {
         await plugin.app.vault.adapter.write(
             EMERA_DEBUG_LOG_PATH,
@@ -478,7 +480,7 @@ const writeDebugLog = async (
         );
         return EMERA_DEBUG_LOG_PATH;
     } catch (writeError) {
-        console.error('[Emera] Failed to write debug error file', writeError);
+        logger.error('Failed to write debug error file', writeError);
         return null;
     }
 };
@@ -710,8 +712,9 @@ export const bundleFile = async (
     path: string,
     recordDebug?: DebugRecorder,
 ) => {
+    const logger = createLogger(plugin, 'bundler');
     const debug = recordDebug ?? (() => undefined);
-    console.log('Bundling', path);
+    logger.debug('Bundling entry file', { path });
     const entryId = toVaultModuleId(path);
     debug('bundle.start', { path, entryId });
 
@@ -750,7 +753,9 @@ export const bundleFile = async (
         imports: entryChunk.imports,
         dynamicImports: entryChunk.dynamicImports,
     });
-    const unresolvedImports = entryChunk.imports.filter((moduleId) => !isRuntimeExternalImport(moduleId));
+    const unresolvedImports = entryChunk.imports.filter(
+        (moduleId) => !isRuntimeExternalImport(moduleId),
+    );
     const unresolvedDynamicImports = entryChunk.dynamicImports.filter(
         (moduleId) => !isRuntimeExternalImport(moduleId),
     );
@@ -772,9 +777,7 @@ export const bundleFile = async (
         throw new Error(
             `Bundled chunk still contains unresolved imports (imports: ${
                 unresolvedImports.join(', ') || 'none'
-            }, dynamicImports: ${
-                unresolvedDynamicImports.join(', ') || 'none'
-            }).`,
+            }, dynamicImports: ${unresolvedDynamicImports.join(', ') || 'none'}).`,
         );
     }
 
@@ -844,6 +847,7 @@ export const loadUserModule = async (
     plugin: EmeraPlugin,
     trigger: LoadTrigger = 'refresh',
 ): Promise<LoadUserModuleResult> => {
+    const logger = createLogger(plugin, 'bundler');
     const timeline: Array<{ at: string; stage: string; data: unknown }> = [];
     const recordDebug = createDebugRecorder(timeline);
 
@@ -932,7 +936,7 @@ export const loadUserModule = async (
     }
 
     recordDebug('loadUserModule.indexSelected', { indexFile });
-    console.log('Loading index file', indexFile);
+    logger.debug('Loading index file', { indexFile });
 
     let bundledCode = '';
     try {
@@ -950,7 +954,7 @@ export const loadUserModule = async (
             registry: {},
         });
         const details = formatErrorForNotice(err);
-        console.error('[Emera] Failed to bundle user module', {
+        logger.error('Failed to bundle user module', {
             indexFile,
             error: err,
         });
@@ -995,7 +999,7 @@ export const loadUserModule = async (
             registry: {},
         });
         const details = formatErrorForNotice(err);
-        console.error('[Emera] Failed to import bundled user module', {
+        logger.error('Failed to import bundled user module', {
             indexFile,
             bundledCodeLength: bundledCode.length,
             bundledCodePreview: bundledCode.slice(0, 800),

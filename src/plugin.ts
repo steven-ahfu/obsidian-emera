@@ -6,17 +6,20 @@ import { createEmeraStorage, EmeraStorage } from './emera-module/storage';
 import { populateRootScope, ScopeNode } from './scope';
 import { EmeraCodeProcessor } from './processors/code-processor';
 import { normalizeAutoRefreshDebounceMs, shouldAutoRefreshForPath } from './auto-refresh';
+import { createLogger } from './logger';
 
 interface PluginSettings {
     componentsFolder: string;
     autoRefreshEnabled: boolean;
     autoRefreshDebounceMs: number;
+    debugLoggingEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: PluginSettings = {
     componentsFolder: 'Components',
     autoRefreshEnabled: true,
     autoRefreshDebounceMs: 300,
+    debugLoggingEnabled: false,
 };
 
 export class EmeraPlugin extends Plugin {
@@ -34,6 +37,7 @@ export class EmeraPlugin extends Plugin {
     private autoRefreshTimeoutId: ReturnType<typeof setTimeout> | null = null;
     private refreshInFlight: Promise<void> | null = null;
     private hasPendingRefresh = false;
+    private logger = createLogger(this, 'plugin');
 
     constructor(app: App, manifest: PluginManifest) {
         super(app, manifest);
@@ -202,6 +206,7 @@ export class EmeraPlugin extends Plugin {
             if (!this.settings.autoRefreshEnabled) {
                 return;
             }
+            this.logger.debug('Running auto refresh');
             await this.refreshUserModule('auto-refresh');
         }, delay);
     }
@@ -214,7 +219,7 @@ export class EmeraPlugin extends Plugin {
         }
 
         const content = await this.app.vault.adapter.read(EMERA_DEBUG_LOG_PATH);
-        console.error('[Emera] Last debug report', content);
+        this.logger.error('Last debug report', content);
 
         const previewMax = 1800;
         const preview =

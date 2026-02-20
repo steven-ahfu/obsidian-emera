@@ -2,8 +2,10 @@ import { atom, Atom, getDefaultStore, useAtom } from 'jotai';
 import type { EmeraPlugin } from '../plugin';
 import { useEmeraContext } from './context';
 import { normalizePath } from 'obsidian';
+import { createLogger } from '../logger';
 
 export const createEmeraStorage = (plugin: EmeraPlugin) => {
+    const logger = createLogger(plugin, 'storage');
     const filePath = normalizePath(`${plugin.settings.componentsFolder}/storage.json`);
     let state: Record<string, any> = {};
     let flushTimerId: null | ReturnType<typeof setTimeout> = null;
@@ -17,7 +19,7 @@ export const createEmeraStorage = (plugin: EmeraPlugin) => {
                 const content = await plugin.app.vault.adapter.read(filePath);
                 state = JSON.parse(content);
             } catch (_err) {
-                console.log(`Emera storage file exists, but Emera couldn't read or parse it`);
+                logger.warn(`Storage file exists but couldn't be parsed`, { filePath });
             }
         }
     };

@@ -190,6 +190,10 @@ export const RedCallout = ({ children }) => {
 Then open **Emera** settings and refresh components. Now you can use
 `HelloWorld`, `HelloWorldInline`, and `RedCallout` in your notes.
 
+If you need deeper troubleshooting output, enable **Verbose debug logging** in
+Emera settings. Emera will keep critical errors visible by default and emit
+extra processor/bundler traces when verbose mode is on.
+
 Inline components use the `emera:` prefix. Everything after `emera:` is parsed
 as JSX, so you can set props or render children:
 
