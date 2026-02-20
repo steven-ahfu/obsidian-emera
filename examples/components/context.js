@@ -1,34 +1,38 @@
-import { Markdown, useEmeraContext, useStorage } from 'emera';
+import { Markdown, useEmeraBasics, useStorage } from 'emera';
 
-// Uses all Emera exports: Markdown, useEmeraContext, and useStorage.
+// Uses Emera exports: Markdown, useEmeraBasics, and useStorage.
 export const EmeraSummary = ({ title = 'Emera summary' }) => {
-    const { file, frontmatter, storage } = useEmeraContext();
-    const [showFrontmatter, setShowFrontmatter] = useStorage('example-show-frontmatter', true);
+    const { app, file, storage } = useEmeraBasics();
+    const [showDetails, setShowDetails] = useStorage('example-show-details', true);
 
     const markdown =
         `**${title}**\n\n` +
+        `- Vault: ${app?.vault.getName() ?? 'Unknown'}\n` +
         `- File: ${file?.path ?? 'No file context'}\n` +
-        `- Frontmatter keys: ${Object.keys(frontmatter ?? {}).join(', ') || 'None'}\n` +
         `- Storage available: ${storage ? 'yes' : 'no'}`;
 
     return (
         <div>
-            <button className="emera-button" onClick={() => setShowFrontmatter(!showFrontmatter)}>
-                Toggle frontmatter
+            <button className="emera-button" onClick={() => setShowDetails(!showDetails)}>
+                Toggle details
             </button>
             <Markdown>{markdown}</Markdown>
-            {showFrontmatter && <pre>{JSON.stringify(frontmatter ?? {}, null, 2)}</pre>}
+            {showDetails && (
+                <pre>
+                    {JSON.stringify({ vault: app?.vault.getName(), file: file?.path }, null, 2)}
+                </pre>
+            )}
         </div>
     );
 };
 
 export const FileInfo = () => {
-    const { file, frontmatter } = useEmeraContext();
+    const { app, file } = useEmeraBasics();
 
     return (
         <div>
+            <div>Vault: {app?.vault.getName() ?? 'Unknown'}</div>
             <div>File: {file?.path ?? 'No file context'}</div>
-            <div>Frontmatter: {JSON.stringify(frontmatter ?? {})}</div>
         </div>
     );
 };

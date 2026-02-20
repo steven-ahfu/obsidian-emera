@@ -5,8 +5,8 @@ status: demo
 
 # Complex example
 
-This note pulls data from Obsidian's `app`, uses all Emera exports, and renders
-components defined across multiple files.
+This note pulls data from Obsidian's `app` and renders components defined across
+multiple files.
 
 Inline app data: emjs: app.vault.getName()
 
@@ -25,7 +25,7 @@ export const fileCount = markdownFiles.length;
 <MotionCard title="Animated summary" />
 <Clock />
 <StorageCounter storageKey="complex-counter" />
-<EmeraSummary title="Emera context overview" />
+<EmeraSummary title="Emera basics overview" />
 
 <RedCallout>
 Recent files:\n- {recentFiles.join('\n- ')}

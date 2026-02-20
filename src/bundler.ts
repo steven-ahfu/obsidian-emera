@@ -6,6 +6,7 @@ import type { EmeraPlugin } from './plugin';
 import { EMERA_GET_SCOPE, EMERA_MODULES } from './consts';
 import { getScope, ScopeNode } from './scope';
 import { createLogger } from './logger';
+import { normalizeComponentsFolders } from './components-folder';
 
 // @ts-ignore not included in package types, but it's there!
 const t = Babel.packages.types;
@@ -850,6 +851,7 @@ export const loadUserModule = async (
     const logger = createLogger(plugin, 'bundler');
     const timeline: Array<{ at: string; stage: string; data: unknown }> = [];
     const recordDebug = createDebugRecorder(timeline);
+    plugin.componentExportConflicts = [];
 
     const finalize = async ({
         ok,
@@ -893,122 +895,173 @@ export const loadUserModule = async (
         };
     };
 
+    const componentsFolders = normalizeComponentsFolders(
+        Array.isArray(plugin.settings.componentsFolders) &&
+            plugin.settings.componentsFolders.length > 0
+            ? plugin.settings.componentsFolders
+            : [plugin.settings.componentsFolder],
+    );
+
     recordDebug('loadUserModule.start', {
         trigger,
-        componentsFolder: plugin.settings.componentsFolder,
+        componentsFolders,
         pluginVersion: plugin.manifest.version,
     });
 
     const extensions = ['js', 'jsx', 'ts', 'tsx'];
-    let indexFile: string | null = null;
-    for (const ext of extensions) {
-        const path = normalizePath(`${plugin.settings.componentsFolder}/index.${ext}`);
-        const exists = await plugin.app.vault.adapter.exists(path);
-        recordDebug('loadUserModule.indexCandidate', { path, exists });
-        if (exists) {
-            indexFile = path;
-            break;
+    const indexFiles: Array<{ folder: string; indexFile: string }> = [];
+    const missingFolders: string[] = [];
+
+    for (const folder of componentsFolders) {
+        let indexFile: string | null = null;
+        for (const ext of extensions) {
+            const path = normalizePath(`${folder}/index.${ext}`);
+            const exists = await plugin.app.vault.adapter.exists(path);
+            recordDebug('loadUserModule.indexCandidate', { folder, path, exists });
+            if (exists) {
+                indexFile = path;
+                break;
+            }
         }
+
+        if (!indexFile) {
+            missingFolders.push(folder);
+            continue;
+        }
+
+        indexFiles.push({ folder, indexFile });
     }
 
-    if (!indexFile) {
+    if (missingFolders.length > 0) {
         const error = new Error(
-            `Index file not found in "${plugin.settings.componentsFolder}" (tried: ${extensions
+            `Index file not found in ${missingFolders.join(', ')} (tried: ${extensions
                 .map((ext) => `index.${ext}`)
                 .join(', ')})`,
         );
-        recordDebug('loadUserModule.error.noIndex', { error: toSerializable(error) });
+        recordDebug('loadUserModule.error.noIndex', {
+            error: toSerializable(error),
+            missingFolders,
+        });
         const { registry, ok, debugPath } = await finalize({
             ok: false,
             phase: 'bundle',
             error,
             context: {
-                componentsFolder: plugin.settings.componentsFolder,
+                componentsFolders,
+                missingFolders,
                 attemptedExtensions: extensions,
             },
             registry: {},
         });
-        new Notice('Error happened while bundling components: ' + error.message);
+        new Notice('Error happened while bundling components: ' + formatErrorForNotice(error));
         if (debugPath) {
             new Notice(`Emera debug details written to ${debugPath}`);
         }
         return { registry, ok };
     }
 
-    recordDebug('loadUserModule.indexSelected', { indexFile });
-    logger.debug('Loading index file', { indexFile });
+    const mergedRegistry: Record<string, unknown> = {};
+    const exportConflicts = new Set<string>();
 
-    let bundledCode = '';
-    try {
-        bundledCode = await bundleFile(plugin, indexFile, recordDebug);
-        recordDebug('loadUserModule.bundleSuccess', { bundledCodeLength: bundledCode.length });
-    } catch (err) {
-        recordDebug('loadUserModule.bundleError', { error: toSerializable(err) });
-        const { registry, ok, debugPath } = await finalize({
-            ok: false,
-            phase: 'bundle',
-            error: err,
-            context: {
-                indexFile,
-            },
-            registry: {},
-        });
-        const details = formatErrorForNotice(err);
-        logger.error('Failed to bundle user module', {
-            indexFile,
-            error: err,
-        });
-        new Notice('Error happened while bundling components: ' + details);
-        if (debugPath) {
-            new Notice(`Emera debug details written to ${debugPath}`);
-        }
-        return { registry, ok };
-    }
+    for (const { folder, indexFile } of indexFiles) {
+        recordDebug('loadUserModule.indexSelected', { folder, indexFile });
+        logger.debug('Loading index file', { folder, indexFile });
 
-    try {
-        const registry = await importFromString(bundledCode, true, recordDebug);
-        recordDebug('loadUserModule.importSuccess', {
-            exportCount: Object.keys(registry).length,
-            exportKeysPreview: Object.keys(registry).slice(0, 100),
-        });
-        const result = await finalize({
-            ok: true,
-            phase: 'success',
-            context: {
+        let bundledCode = '';
+        try {
+            bundledCode = await bundleFile(plugin, indexFile, recordDebug);
+            recordDebug('loadUserModule.bundleSuccess', {
                 indexFile,
                 bundledCodeLength: bundledCode.length,
+            });
+        } catch (err) {
+            recordDebug('loadUserModule.bundleError', { indexFile, error: toSerializable(err) });
+            const { registry, ok, debugPath } = await finalize({
+                ok: false,
+                phase: 'bundle',
+                error: err,
+                context: {
+                    indexFile,
+                    indexFiles,
+                },
+                registry: {},
+            });
+            const details = formatErrorForNotice(err);
+            logger.error('Failed to bundle user module', {
+                indexFile,
+                error: err,
+            });
+            new Notice('Error happened while bundling components: ' + details);
+            if (debugPath) {
+                new Notice(`Emera debug details written to ${debugPath}`);
+            }
+            return { registry, ok };
+        }
+
+        try {
+            const registry = await importFromString(bundledCode, true, recordDebug);
+            recordDebug('loadUserModule.importSuccess', {
+                indexFile,
                 exportCount: Object.keys(registry).length,
-            },
-            registry,
-        });
-        return {
-            registry: result.registry,
-            ok: result.ok,
-        };
-    } catch (err) {
-        recordDebug('loadUserModule.importError', { error: toSerializable(err) });
-        const { registry, ok, debugPath } = await finalize({
-            ok: false,
-            phase: 'import',
-            error: err,
-            context: {
+                exportKeysPreview: Object.keys(registry).slice(0, 100),
+            });
+
+            for (const [key, value] of Object.entries(registry)) {
+                if (Object.prototype.hasOwnProperty.call(mergedRegistry, key)) {
+                    exportConflicts.add(key);
+                }
+                mergedRegistry[key] = value;
+            }
+        } catch (err) {
+            recordDebug('loadUserModule.importError', { indexFile, error: toSerializable(err) });
+            const { registry, ok, debugPath } = await finalize({
+                ok: false,
+                phase: 'import',
+                error: err,
+                context: {
+                    indexFile,
+                    bundledCodeLength: bundledCode.length,
+                    bundledCodePreview: bundledCode.slice(0, 1200),
+                },
+                registry: {},
+            });
+            const details = formatErrorForNotice(err);
+            logger.error('Failed to import bundled user module', {
                 indexFile,
                 bundledCodeLength: bundledCode.length,
-                bundledCodePreview: bundledCode.slice(0, 1200),
-            },
-            registry: {},
-        });
-        const details = formatErrorForNotice(err);
-        logger.error('Failed to import bundled user module', {
-            indexFile,
-            bundledCodeLength: bundledCode.length,
-            bundledCodePreview: bundledCode.slice(0, 800),
-            error: err,
-        });
-        new Notice('Error happened while loading components: ' + details);
-        if (debugPath) {
-            new Notice(`Emera debug details written to ${debugPath}`);
+                bundledCodePreview: bundledCode.slice(0, 800),
+                error: err,
+            });
+            new Notice('Error happened while loading components: ' + details);
+            if (debugPath) {
+                new Notice(`Emera debug details written to ${debugPath}`);
+            }
+            return { registry, ok };
         }
-        return { registry, ok };
     }
+
+    const conflictList = Array.from(exportConflicts).sort();
+    plugin.componentExportConflicts = conflictList;
+    if (conflictList.length > 0) {
+        logger.warn('Component export conflicts detected', {
+            conflicts: conflictList,
+            componentsFolders,
+        });
+    }
+
+    const result = await finalize({
+        ok: true,
+        phase: 'success',
+        context: {
+            indexFiles,
+            exportCount: Object.keys(mergedRegistry).length,
+            exportConflicts: conflictList,
+        },
+        registry: mergedRegistry,
+    });
+
+    return {
+        registry: result.registry,
+        ok: result.ok,
+    };
 };
