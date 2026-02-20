@@ -62,3 +62,16 @@
     display: flex;
     gap: 0.5rem;
 }
+
+.emera-components-folder-input {
+    min-width: 28rem;
+    width: min(100%, 34rem);
+    max-width: 100%;
+}
+
+@media (max-width: 900px) {
+    .emera-components-folder-input {
+        min-width: 0;
+        width: 100%;
+    }
+}

@@ -1,3 +1,14 @@
+/**
+ * Release helper used by `npm run version`.
+ *
+ * Purpose:
+ * - Read the package version from `npm_package_version` (from `package.json`).
+ * - Set `manifest.json.version` to that same version.
+ * - Add/update the matching entry in `versions.json` using the current
+ *   `manifest.json.minAppVersion`.
+ *
+ * This keeps Obsidian plugin metadata files aligned with `package.json`.
+ */
 import { readFileSync, writeFileSync } from 'fs';
 
 const targetVersion = process.env.npm_package_version;

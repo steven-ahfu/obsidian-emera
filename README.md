@@ -6,6 +6,11 @@
 > still use it, as existing features work quite well. But there won't be any
 > new features, and any bugs are unlikely to be fixed.
 
+> [!NOTE]
+> This repository is an actively maintained fork by `steven-ahfu`. Original
+> project credit remains with `OlegWock`, with new maintenance and feature work
+> added in this fork.
+
 This is a plugin for [Obsidian](https://obsidian.md) which enables you to use
 React components and inline JavaScript directly into your notes. Kinda like
 MDX.
@@ -52,6 +57,103 @@ via Obsidian (Settings -> Community plugins -> Browse -> Search for "Emera").
 To install Emera manually you need to download zip file from latest release and
 unpack it into `<your vault>/.obisdian/plugins/emera` and enable it in
 Obsidian's settings.
+
+## Local development and testing
+
+This section describes how to run Emera locally for development and how to run
+the project checks before creating a pull request.
+
+### Prerequisites
+
+Use Node.js `24.13.1` (or newer). This repository includes `.nvmrc`, so if you
+use `nvm`:
+
+```bash
+nvm install
+nvm use
+```
+
+Then install dependencies:
+
+```bash
+yarn install
+```
+
+### Development commands
+
+Use these commands during local development:
+
+```bash
+yarn dev
+yarn test
+yarn typecheck
+yarn lint
+yarn format
+yarn build
+```
+
+Before opening a pull request, run the full quality gate:
+
+```bash
+yarn typecheck && yarn test && yarn lint && yarn format && yarn build
+```
+
+### Enable git hooks
+
+To enforce lint and tests on both `git commit` and `git push`, install the
+repository hooks:
+
+```bash
+yarn hooks:install
+```
+
+### Run in Obsidian locally
+
+To test Emera in a real vault, install the built plugin into your vault's
+plugin directory:
+
+1. Build the plugin:
+
+```bash
+yarn build
+```
+
+2. Copy `manifest.json`, `main.js`, and `styles.css` into:
+   `<your vault>/.obsidian/plugins/emera/`
+3. In Obsidian, open **Settings -> Community plugins**, enable **Emera**, and
+   reload the app if needed.
+
+### Deploy directly to your local vault
+
+For faster iteration, you can deploy the production build straight into your
+vault plugin directory with one command.
+
+1. Copy `.env.example` to `.env.local`.
+2. Set `EMERA_VAULT_PATH` in `.env.local` to your vault root path.
+3. Run:
+
+```bash
+yarn deploy:vault
+```
+
+This command runs a production build and copies `main.js`, `manifest.json`, and
+`styles.css` into `<vault>/.obsidian/plugins/emera`.
+
+If you already built and only want to re-copy artifacts, run:
+
+```bash
+yarn sync:vault
+```
+
+### Manual regression checklist
+
+Before merging user-facing changes, run this quick smoke test in Obsidian:
+
+1. Open `examples/notes/01-components.md` and verify inline + block render.
+2. Open `examples/notes/02-inline-js.md` and verify inline JS + exports.
+3. Trigger a component refresh path (for example by changing a file in the
+   components folder) and verify rendered output updates correctly.
+4. Confirm there are no new console errors from Emera during rendering.
 
 ## How to use
 
