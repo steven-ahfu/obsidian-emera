@@ -1,6 +1,6 @@
 {
     "name": "obsidian-emera",
-    "version": "1.4.5",
+    "version": "1.4.6",
     "description": "MDX for Obsidian. Kinda.",
     "main": "main.js",
     "scripts": {
@@ -14,7 +14,7 @@
         "version": "node version-bump.mjs && git add manifest.json versions.json",
         "hooks:install": "node scripts/install-git-hooks.mjs",
         "sync:vault": "node --env-file-if-exists=.env.local scripts/deploy-to-vault.mjs",
-        "deploy:vault": "yarn build && yarn sync:vault"
+        "deploy:vault": "yarn test && yarn build && yarn sync:vault"
     },
     "keywords": [],
     "author": "OlegWock & steven-ahfu",

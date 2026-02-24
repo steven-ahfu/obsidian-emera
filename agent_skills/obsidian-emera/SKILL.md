@@ -23,9 +23,9 @@ If these conflict, follow `.agents/AGENTS.md`, then `AGENTS.md`, then code.
 ## Current main snapshot (baseline)
 
 Baseline is the public `main` branch state of
-`https://github.com/steven-ahfu/obsidian-emera` as of February 20, 2026.
+`https://github.com/steven-ahfu/obsidian-emera` as of February 24, 2026.
 
-- Plugin: `emera` version `1.4.5`
+- Plugin: `emera` version `1.4.6`
 - Min Obsidian version: `1.6.5`
 - Runtime target: desktop + mobile (`isDesktopOnly: false`)
 - Node/tooling baseline: Node.js `>=24.13.1`
@@ -38,7 +38,8 @@ Baseline is the public `main` branch state of
 - Inline JS (`emjs:`) and JS blocks with exports/scope chaining
 - Reading mode + live preview support
 - Canvas + mobile support
-- Components loaded from vault JS/TS module entrypoint
+- Components loaded from vault JS/TS module entrypoints across folders
+- Multiple components folders with ordered export merging and conflict warnings
 - Auto refresh user module with settings toggle + debounce
 - Verbose debug logging mode with quieter default logging
 - Command to show last debug report; debug report persisted at
@@ -49,7 +50,7 @@ Baseline is the public `main` branch state of
 
 - No Node built-ins in user component code
 - No direct npm package install usage inside component runtime
-- Prefer ESM CDN imports or local files in components folder
+- Prefer ESM CDN imports or local files in components folders
 
 ### File layout
 
@@ -59,7 +60,7 @@ Baseline is the public `main` branch state of
 - `src/bundler.ts`: browser-side transpile/bundle pipeline + debug report writes
 - `src/logger.ts`: central logger with debug gating
 - `src/processors/`: markdown/code block processing
-- `src/emera-module/`: public module exports/hooks/storage helpers
+- `src/emera-module/`: public module exports, context, and storage helpers
 - `styles.css`: plugin styles
 - `examples/`: runnable notes + component examples for manual verification
 - `.agents/docs/`: roadmap + handoff state
@@ -112,7 +113,7 @@ Use example notes for quick manual smoke checks in Obsidian:
 
 - `examples/notes/01-components.md`
 - `examples/notes/02-inline-js.md`
-- `examples/notes/04-storage.md`
+- `examples/notes/03-storage.md`
 
 ## Roadmap-aware behavior
 

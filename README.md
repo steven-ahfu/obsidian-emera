@@ -36,9 +36,8 @@ MDX.
 - [x] Verbose debug logging option added to settings
 - [x] Way more usage examples and docs (see `examples/`)
 - [x] An obsidian-emera agents skill (included in this repo)
-    - Will stay up to date with this repo's main branch 
+    - Will stay up to date with this repo's main branch
 - [ ] Improved Runtime UX (In progress)
-
 
 ## How to Install
 
@@ -60,10 +59,19 @@ notes.
 
 ### Components
 
-After you install and enable Emera, set your components folder in **Emera**
-settings. By default it's the `Components` folder in the root of your vault.
+After you install and enable Emera, set your components folders in **Emera**
+settings. By default it uses the `Components` folder in the root of your
+vault.
 
-Create `index.js` in your components folder and export components:
+Each components folder must include an `index.js` file (or `index.ts`,
+`index.jsx`, or `index.tsx`). Emera merges exports in order. When two folders
+export the same name, Emera uses the last folder in the list and shows a
+warning in **Emera** settings.
+
+Use the **Add folder** control in settings to list multiple component
+directories.
+
+Create `index.js` in each components folder and export components:
 
 ```jsx
 import { Markdown } from 'emera';
@@ -190,8 +198,9 @@ Emera supports these patterns when building components:
 I tried to make working with Emera as easy as possible, but there are still a
 few constraints you need to keep in mind.
 
-- You can't use external modules installed with npm. Use an ESM CDN or place a
-  library inside your components folder.
+- You can't directly use modules installed via npm (i.e., from `node_modules`).
+  You must import them using an ESM CDN URL or place the library source files
+  directly in your components folders.
 - You can't use Node.js built-in modules.
 
 ### Available modules
@@ -214,12 +223,13 @@ Currently Emera exposes these modules:
 
 ### Emera module
 
-Emera exposes a set of components and hooks that are useful when building
+Emera exposes a set of components and helpers that are useful when building
 components for Obsidian.
 
 - `<Markdown />` – renders markdown using Obsidian's renderer. Props match a
   `div` except `children` must be a string.
-- `useEmeraContext()` – exposes `file`, `frontmatter`, and `storage`.
+- `useEmeraBasics()` – exposes `app`, `file`, and `storage` for basic context.
+- `useEmeraContext()` – exposes `app`, `file`, `frontmatter`, and `storage`.
 - `useStorage<T>(key: string, defaultValue: T)` – provides persisted plugin-wide
   state with a `useState`-like API.
 
@@ -227,7 +237,7 @@ components for Obsidian.
 
 This repo includes working examples with JS files and matching notes:
 
-1. Set your components folder to `examples/components`.
+1. Set your components folders to include `examples/components`.
 2. Refresh components in Emera settings.
 3. Open a note from `examples/notes`.
 
@@ -235,10 +245,11 @@ Example notes:
 
 - `examples/notes/01-components.md` – inline and block components.
 - `examples/notes/02-inline-js.md` – inline JS, exports, and scope order.
-- `examples/notes/04-storage.md` – `useStorage` and `useEmeraContext`.
-- `examples/notes/06-motion-and-jotai.md` – framer-motion and Jotai.
-- `examples/notes/07-esm-cdn.md` – ESM CDN imports.
-- `examples/notes/08-complex-example.md` – full, multi-file example.
+- `examples/notes/03-storage.md` – `useStorage`, `useEmeraBasics`, and
+  `useEmeraContext`.
+- `examples/notes/04-motion-and-jotai.md` – framer-motion and Jotai.
+- `examples/notes/05-esm-cdn.md` – ESM CDN imports.
+- `examples/notes/06-complex-example.md` – full, multi-file example.
 
 ## How it works
 
@@ -401,5 +412,5 @@ Before merging user-facing changes, run this quick smoke test in Obsidian:
 1. Open `examples/notes/01-components.md` and verify inline + block render.
 2. Open `examples/notes/02-inline-js.md` and verify inline JS + exports.
 3. Trigger a component refresh path (for example by changing a file in the
-   components folder) and verify rendered output updates correctly.
+   components folders) and verify rendered output updates correctly.
 4. Confirm there are no new console errors from Emera during rendering.

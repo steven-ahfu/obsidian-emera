@@ -1,4 +1,13 @@
 import { App, MarkdownView, Notice, Plugin, PluginManifest, TAbstractFile } from 'obsidian';
+
+const COMPONENT_USAGE_MAP: Record<string, string[]> = {
+    RootComponent: ['src/processors/code-processor.ts', 'src/renderer.ts'],
+    ErrorAlert: ['src/processors/code-processor.ts'],
+    ErrorBoundary: ['src/processors/code-processor.ts', 'src/renderer.ts'],
+    LoadingInline: ['src/processors/code-processor.ts'],
+    JsBlockPlaceholder: ['src/processors/code-processor.ts'],
+    EmptyBlock: ['src/processors/code-processor.ts'],
+};
 import { SettingTab } from './settings';
 import { EMERA_DEBUG_LOG_PATH, loadUserModule, type LoadTrigger } from './bundler';
 import { EMERA_ROOT_SCOPE } from './consts';
@@ -6,10 +15,12 @@ import { createEmeraStorage, EmeraStorage } from './emera-module/storage';
 import { populateRootScope, ScopeNode } from './scope';
 import { EmeraCodeProcessor } from './processors/code-processor';
 import { normalizeAutoRefreshDebounceMs, shouldAutoRefreshForPath } from './auto-refresh';
+import { normalizeComponentsFolders } from './components-folder';
 import { createLogger } from './logger';
 
 interface PluginSettings {
     componentsFolder: string;
+    componentsFolders: string[];
     autoRefreshEnabled: boolean;
     autoRefreshDebounceMs: number;
     debugLoggingEnabled: boolean;
@@ -17,6 +28,7 @@ interface PluginSettings {
 
 const DEFAULT_SETTINGS: PluginSettings = {
     componentsFolder: 'Components',
+    componentsFolders: ['Components'],
     autoRefreshEnabled: true,
     autoRefreshDebounceMs: 300,
     debugLoggingEnabled: false,
@@ -32,6 +44,12 @@ export class EmeraPlugin extends Plugin {
     private lastUserModuleLoadOk = false;
     storage: EmeraStorage;
     rootScope: ScopeNode;
+
+    // Session State for next steps
+    sessionPriorityPhase4: '🔄' | '⏸️' | '▶️' = '🔄';
+    sessionPriorityPhase5: '🔄' | '⏸️' | '▶️' = '⏸️';
+    componentUsageMap: typeof COMPONENT_USAGE_MAP | null = COMPONENT_USAGE_MAP;
+    componentExportConflicts: string[] = [];
 
     codeProcessor: EmeraCodeProcessor;
     private autoRefreshTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -106,6 +124,13 @@ export class EmeraPlugin extends Plugin {
     };
 
     refreshUserModule = async (trigger: LoadTrigger = 'refresh'): Promise<boolean> => {
+        if (this.sessionPriorityPhase4 === '🔄') {
+            this.sessionPriorityPhase4 = '▶️';
+        }
+        if (this.sessionPriorityPhase5 === '⏸️') {
+            this.sessionPriorityPhase5 = '▶️'; // Running the generation/check, so setting to running
+        }
+
         if (this.refreshInFlight) {
             this.hasPendingRefresh = true;
             await this.refreshInFlight;
@@ -113,6 +138,9 @@ export class EmeraPlugin extends Plugin {
         }
 
         this.refreshInFlight = (async () => {
+            this.logger.info(
+                `Running module load triggered by: ${trigger}. Session State Update: P4->${this.sessionPriorityPhase4}, P5->${this.sessionPriorityPhase5}`,
+            );
             const { registry, ok } = await loadUserModule(this, trigger);
             this.lastUserModuleLoadOk = ok;
             this.rootScope.setMany(registry);
@@ -132,6 +160,23 @@ export class EmeraPlugin extends Plugin {
 
         return this.lastUserModuleLoadOk;
     };
+
+    private async showComponentUsageMap() {
+        if (!this.componentUsageMap) {
+            new Notice('Component usage map data is not available.');
+            return;
+        }
+
+        this.logger.info('Component Usage Map Data:', this.componentUsageMap);
+
+        const formatted = Object.entries(this.componentUsageMap)
+            .map(([component, locations]) => {
+                return `${component}:\\n  ${locations.join(',\\n  ')}`;
+            })
+            .join('\\n\\n');
+
+        new Notice(`Component Usage Map:\\n\\n${formatted}`, 20000);
+    }
 
     onunload() {
         this.storage.destroy();
@@ -153,8 +198,20 @@ export class EmeraPlugin extends Plugin {
     }
 
     private normalizeSettings(settings: PluginSettings): PluginSettings {
+        const normalizedFolders = normalizeComponentsFolders(
+            Array.isArray(settings.componentsFolders) && settings.componentsFolders.length > 0
+                ? settings.componentsFolders
+                : [settings.componentsFolder ?? DEFAULT_SETTINGS.componentsFolder],
+        );
+        const componentsFolders =
+            normalizedFolders.length > 0
+                ? normalizedFolders
+                : normalizeComponentsFolders([DEFAULT_SETTINGS.componentsFolder]);
+
         return {
             ...settings,
+            componentsFolders,
+            componentsFolder: componentsFolders[0],
             autoRefreshDebounceMs: normalizeAutoRefreshDebounceMs(
                 settings.autoRefreshDebounceMs,
                 DEFAULT_SETTINGS.autoRefreshDebounceMs,
@@ -185,7 +242,7 @@ export class EmeraPlugin extends Plugin {
     private shouldAutoRefreshForPath(path: string): boolean {
         return shouldAutoRefreshForPath({
             path,
-            componentsFolder: this.settings.componentsFolder,
+            componentsFolders: this.settings.componentsFolders,
             autoRefreshEnabled: this.settings.autoRefreshEnabled,
             isFilesLoaded: this.isFilesLoaded,
         });

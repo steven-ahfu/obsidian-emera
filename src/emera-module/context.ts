@@ -9,7 +9,20 @@ export type EmeraContextType = {
     plugin: EmeraPlugin;
     storage: EmeraStorage;
     app: App;
+    renderMode: 'reading' | 'editing' | 'canvas';
 };
 
 export const [EmeraContextProvider, useEmeraContext] =
     createStrictContext<EmeraContextType>('EmeraContext');
+
+export const useIsPreview = () => {
+    const context = useEmeraContext();
+    return context.renderMode === 'reading' || context.renderMode === 'canvas';
+};
+
+export type EmeraBasicsContext = Pick<EmeraContextType, 'app' | 'file' | 'plugin' | 'storage'>;
+
+export const useEmeraBasics = (): EmeraBasicsContext => {
+    const { app, file, plugin, storage } = useEmeraContext();
+    return { app, file, plugin, storage };
+};

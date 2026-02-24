@@ -64,8 +64,8 @@
 }
 
 .emera-components-folder-input {
-    min-width: 28rem;
-    width: min(100%, 34rem);
+    min-width: 0;
+    width: 100%;
     max-width: 100%;
 }
 
@@ -74,4 +74,48 @@
         min-width: 0;
         width: 100%;
     }
+}
+
+.emera-components-folder-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+}
+
+.emera-components-folder-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.emera-components-folder-row input.emera-components-folder-input {
+    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.emera-components-folder-remove {
+    flex: 0 0 auto;
+}
+
+.emera-components-folder-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 6px;
+}
+
+.emera-components-folders-setting {
+    align-items: flex-start;
+}
+
+.emera-components-folders-setting .setting-item-info {
+    flex: 1 1 35%;
+    min-width: 12rem;
+}
+
+.emera-components-folders-setting .setting-item-control {
+    flex: 1 1 65%;
+    min-width: 0;
 }
