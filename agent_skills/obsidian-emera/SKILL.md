@@ -113,7 +113,7 @@ Use example notes for quick manual smoke checks in Obsidian:
 
 - `examples/notes/01-components.md`
 - `examples/notes/02-inline-js.md`
-- `examples/notes/04-storage.md`
+- `examples/notes/03-storage.md`
 
 ## Roadmap-aware behavior
 

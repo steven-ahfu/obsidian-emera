@@ -14,8 +14,7 @@
         "version": "node version-bump.mjs && git add manifest.json versions.json",
         "hooks:install": "node scripts/install-git-hooks.mjs",
         "sync:vault": "node --env-file-if-exists=.env.local scripts/deploy-to-vault.mjs",
-        "predeploy:vault": "yarn test",
-        "deploy:vault": "yarn build && yarn sync:vault"
+        "deploy:vault": "yarn test && yarn build && yarn sync:vault"
     },
     "keywords": [],
     "author": "OlegWock & steven-ahfu",
