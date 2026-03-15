@@ -29,3 +29,5 @@ meta.json
 # Local environment overrides (keep vault paths and local secrets out of git)
 .env.local
 .env.*.local
+
+.omc/

@@ -86,14 +86,12 @@ export class EmeraCodeProcessor {
 
         let evaluated;
         try {
-            // console.log('Evaluating inline js', content);
-
             const transpiled = transpileCode(`export default () => ${code}`, {
                 rewriteImports: false,
                 scope: ctx.readScope,
             });
 
-            await await ctx.readScope.waitForUnblock();
+            await ctx.readScope.waitForUnblock();
             const module = await importFromString(transpiled);
             evaluated = await module.default();
         } catch (err) {
@@ -127,9 +125,6 @@ export class EmeraCodeProcessor {
 
             const factory = await compileJsxIntoFactory(code, ctx.readScope);
             await ctx.readScope.waitForUnblock();
-            // console.log('Processing inline JSX', code);
-            // console.log('Compiled into', component);
-            // console.log('Using scope', ctx.readScope, { ...ctx.readScope.scope });
             renderComponent({
                 component: RootComponent,
                 props: { factory },
@@ -194,8 +189,6 @@ export class EmeraCodeProcessor {
         ctx: ProcessorContext,
     ) => {
         wrapper.classList.add('emera-block-jsx');
-        // console.log('Processing JSX block');
-        // console.log(content);
 
         if (content) {
             try {
@@ -275,6 +268,7 @@ export class EmeraCodeProcessor {
             ctx: ProcessorContext;
             renderKey: string;
             rootWrapper: HTMLElement | null = null;
+            private abortController: AbortController | null = null;
 
             constructor(renderKey: string, content: string, ctx: ProcessorContext) {
                 super();
@@ -291,19 +285,30 @@ export class EmeraCodeProcessor {
                 const wrapper = document.createElement(inline ? 'span' : 'div');
                 const reactRootWrapper = document.createElement(inline ? 'span' : 'div');
                 this.rootWrapper = reactRootWrapper;
+                this.abortController = new AbortController();
                 wrapper.appendChild(reactRootWrapper);
-                wrapper.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    view.dispatch({
-                        selection: { anchor: view.posAtDOM(wrapper) },
-                        scrollIntoView: true,
-                    });
-                });
-                func(reactRootWrapper, this.content, this.ctx);
+                wrapper.addEventListener(
+                    'click',
+                    (e) => {
+                        e.preventDefault();
+                        view.dispatch({
+                            selection: { anchor: view.posAtDOM(wrapper) },
+                            scrollIntoView: true,
+                        });
+                    },
+                    { signal: this.abortController.signal },
+                );
+                Promise.resolve(func(reactRootWrapper, this.content, this.ctx)).catch(
+                    () => {},
+                );
                 return wrapper;
             }
 
             destroy(): void {
+                if (this.abortController) {
+                    this.abortController.abort();
+                    this.abortController = null;
+                }
                 if (this.rootWrapper) {
                     unmountRenderedComponent(this.rootWrapper);
                     this.rootWrapper = null;
@@ -366,18 +371,19 @@ export class EmeraCodeProcessor {
                             const replacement = document.createElement(
                                 el.type.startsWith('inline') ? 'span' : 'div',
                             );
-                            if (el.type === 'inline-js')
-                                this.processInlineJs(replacement, el.content, processorCtx);
-                            if (el.type === 'inline-jsx')
-                                this.processInlineJsx(replacement, el.content, processorCtx);
-                            if (el.type === 'block-js')
-                                this.processBlockJs(replacement, el.content, processorCtx);
-                            if (el.type === 'block-jsx')
-                                this.processBlockJsx(replacement, el.content, processorCtx);
+                            const invoke = (fn: ProcessFunction) =>
+                                void Promise.resolve(
+                                    fn(replacement, el.content, processorCtx),
+                                ).catch(() => {});
+                            if (el.type === 'inline-js') invoke(this.processInlineJs);
+                            if (el.type === 'inline-jsx') invoke(this.processInlineJsx);
+                            if (el.type === 'block-js') invoke(this.processBlockJs);
+                            if (el.type === 'block-jsx') invoke(this.processBlockJsx);
 
                             readScope = writeScope;
                             if (el.type.startsWith('inline')) el.el.replaceWith(replacement);
-                            else el.el.parentElement!.replaceWith(replacement);
+                            else if (el.el.parentElement)
+                                el.el.parentElement.replaceWith(replacement);
                         });
                     }
                 }
@@ -401,8 +407,6 @@ export class EmeraCodeProcessor {
                 // This is content from our <Markdown /> component, we don't want to process it
                 return;
             }
-
-            // console.log('MD post', el, ctx);
 
             const file = ctx.sourcePath
                 ? this.plugin.app.vault.getFileByPath(ctx.sourcePath)
@@ -647,8 +651,6 @@ export class EmeraCodeProcessor {
 
             this.logger.debug('Will process editor nodes', { count: toProcess.length });
             const pageScope = getPageScope(parent.plugin, file);
-            // console.log('[EDITOR] Disposing page scope descendants', pageScope.id);
-            // pageScope.disposeDescendants();
 
             const cache: PluginState['cache'] = [];
             let shouldForceCached = false;
@@ -706,7 +708,6 @@ export class EmeraCodeProcessor {
                 }
 
                 if (shouldReevaluate && !shouldForceCached) {
-                    // console.log('Resetting write scope');
                     writeScope.reset();
                 }
 

@@ -23,7 +23,7 @@ export const Markdown = forwardRef<HTMLDivElement, MarkdownProps>(
                 ctx.file?.path ?? '',
                 ctx.plugin,
             );
-        }, []);
+        }, [children, ctx.plugin.app, ctx.file?.path]);
 
         return (
             <Component

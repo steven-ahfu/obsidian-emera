@@ -25,6 +25,10 @@ export const createEmeraStorage = (plugin: EmeraPlugin) => {
     };
 
     const destroy = () => {
+        if (flushTimerId !== null) {
+            clearTimeout(flushTimerId);
+            flushTimerId = null;
+        }
         unsubFunction.forEach((cb) => cb());
     };
 

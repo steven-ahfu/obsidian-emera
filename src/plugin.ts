@@ -10,7 +10,7 @@ const COMPONENT_USAGE_MAP: Record<string, string[]> = {
 };
 import { SettingTab } from './settings';
 import { EMERA_DEBUG_LOG_PATH, loadUserModule, type LoadTrigger } from './bundler';
-import { EMERA_ROOT_SCOPE } from './consts';
+import { EMERA_GET_SCOPE, EMERA_MODULES, EMERA_ROOT_SCOPE } from './consts';
 import { createEmeraStorage, EmeraStorage } from './emera-module/storage';
 import { populateRootScope, ScopeNode } from './scope';
 import { EmeraCodeProcessor } from './processors/code-processor';
@@ -184,6 +184,11 @@ export class EmeraPlugin extends Plugin {
             clearTimeout(this.autoRefreshTimeoutId);
             this.autoRefreshTimeoutId = null;
         }
+        this.rootScope.disposeDescendants();
+        delete (window as any).emera;
+        delete (window as any)[EMERA_MODULES];
+        delete (window as any)[EMERA_ROOT_SCOPE];
+        delete (window as any)[EMERA_GET_SCOPE];
     }
 
     async loadSettings() {

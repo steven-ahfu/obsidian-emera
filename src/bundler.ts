@@ -36,7 +36,11 @@ function resolvePath(base: string, relative: string) {
         if (parts[i] === '..') stack.pop();
         else stack.push(parts[i]);
     }
-    return stack.join('/');
+    const resolved = stack.join('/');
+    if (resolved.startsWith('..') || resolved.startsWith('/')) {
+        throw new Error(`Import path escapes vault root: ${relative}`);
+    }
+    return resolved;
 }
 
 const EMERA_VAULT_MODULE_PREFIX = 'emera://vault/';
@@ -334,10 +338,6 @@ function scopeRewriter() {
                     ),
                 );
 
-                // console.log('Replacing node with');
-                // @ts-ignore
-                // console.log(Babel.packages.generator.default(replacement).code);
-
                 path.replaceWith(replacement);
             },
         },
@@ -591,13 +591,8 @@ export const transpileCode = (
     if (!transpiled) {
         throw new Error('Babel failed :(');
     }
-    // console.log('Original', code);
-    // console.log(transpiled);
     return transpiled;
 };
-
-// @ts-ignore
-window.transpileCode = transpileCode;
 
 const rollupVirtualFsPlugin = (
     plugin: EmeraPlugin,
@@ -827,14 +822,9 @@ export const compileJsxIntoFactory = async (
     const source = `export default () => {
         return (<>${jsx}</>);
     };`;
-    // console.log('====== Scope', scope);
-    // console.log('====== Original JSX');
-    // console.log(jsx);
     const transpiled = transpileCode(source, {
         scope,
     });
-    // console.log('====== Compiled JSX code');
-    // console.log(transpiled);
     const { default: factory } = await importFromString(transpiled);
     return factory;
 };

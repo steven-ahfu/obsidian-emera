@@ -70,12 +70,21 @@ export class ScopeNode {
         }
     }
 
-    waitForUnblock() {
+    waitForUnblock(timeoutMs = 30000): Promise<void> {
         const blockedScope = this.findUp((scope) => !!scope.unblockPromiseWithResolvers);
-        if (blockedScope) {
-            return blockedScope.unblockPromiseWithResolvers!.promise;
+        if (!blockedScope) {
+            return Promise.resolve();
         }
-        return Promise.resolve();
+        const blocked = blockedScope.unblockPromiseWithResolvers!.promise;
+        return Promise.race([
+            blocked,
+            new Promise<void>((_, reject) =>
+                setTimeout(
+                    () => reject(new Error(`Scope "${blockedScope.id}" unblock timed out`)),
+                    timeoutMs,
+                ),
+            ),
+        ]);
     }
 
     private scheduleOnChange() {
@@ -137,6 +146,8 @@ export class ScopeNode {
     }
 
     dispose() {
+        this.unblock();
+        this.listeners.clear();
         if (this.parent) {
             this.parent.children.splice(this.parent.children.indexOf(this), 1);
             this.parent.removeDescendant(this);

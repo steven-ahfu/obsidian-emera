@@ -2,49 +2,48 @@ name: Release Obsidian plugin
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - master
-    paths:
-      - "manifest.json"
 
 jobs:
-  build:
+  release:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: "18.x"
+          node-version: "24"
           cache: "yarn"
+
       - run: yarn install --frozen-lockfile
-      - id: set_var
+
+      - name: Read version from manifest
+        id: meta
         run: |
-          content=`cat ./manifest.json`
-          # the following lines are only required for multi line json
-          content="${content//'%'/'%25'}"
-          content="${content//$'\n'/'%0A'}"
-          content="${content//$'\r'/'%0D'}"
-          # end of optional handling for multi line json
-          echo "::set-output name=manifestJson::$content"
+          echo "version=$(jq -r .version manifest.json)" >> "$GITHUB_OUTPUT"
+
       - name: Build plugin
         run: yarn build
-      - name: 'Zip files'
-        uses: montudor/action-zip@v1
+
+      - name: Stage release assets
+        run: |
+          cp node_modules/@rollup/browser/dist/bindings_wasm_bg.wasm bindings_wasm_bg.wasm
+          zip -qq "emera-${{ steps.meta.outputs.version }}.zip" \
+            main.js manifest.json styles.css bindings_wasm_bg.wasm
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
         with:
-          args: "zip -qq -r emera-${{fromJson(steps.set_var.outputs.manifestJson).version}}.zip main.js manifest.json styles.css"
-      - name: Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: "${{fromJson(steps.set_var.outputs.manifestJson).version}}"
-          generate_release_notes: false
+          tag_name: "${{ steps.meta.outputs.version }}"
+          name: "${{ steps.meta.outputs.version }}"
+          generate_release_notes: true
           files: |
-            *.zip
-            manifest.json
+            emera-${{ steps.meta.outputs.version }}.zip
             main.js
+            manifest.json
             styles.css
+            bindings_wasm_bg.wasm
