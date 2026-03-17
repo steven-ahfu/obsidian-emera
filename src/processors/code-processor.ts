@@ -298,9 +298,7 @@ export class EmeraCodeProcessor {
                     },
                     { signal: this.abortController.signal },
                 );
-                Promise.resolve(func(reactRootWrapper, this.content, this.ctx)).catch(
-                    () => {},
-                );
+                Promise.resolve(func(reactRootWrapper, this.content, this.ctx)).catch(() => {});
                 return wrapper;
             }
 
@@ -347,43 +345,51 @@ export class EmeraCodeProcessor {
 
                         let readScope = startScope;
                         queue.forEach((el, index, arr) => {
-                            const writeScopeId = file
-                                ? `page/${file.path}/${index}`
-                                : `anon-doc/${key}/${index}`;
-                            let writeScope = getScope(writeScopeId);
-                            if (writeScope) {
-                                writeScope.dispose();
+                            try {
+                                const writeScopeId = file
+                                    ? `page/${file.path}/${index}`
+                                    : `anon-doc/${key}/${index}`;
+                                let writeScope = getScope(writeScopeId);
+                                if (writeScope) {
+                                    writeScope.dispose();
+                                }
+                                writeScope = new ScopeNode(writeScopeId);
+                                readScope.addChild(writeScope);
+                                const processorCtx = {
+                                    file,
+                                    index,
+                                    total: arr.length,
+                                    mode: 'preview' as const,
+                                    originalPreviewElement: el.el,
+                                    shortcutComponent: el.shortcutComponent,
+                                    readScope,
+                                    writeScope,
+                                    renderMode: 'reading' as const,
+                                };
+
+                                const replacement = document.createElement(
+                                    el.type.startsWith('inline') ? 'span' : 'div',
+                                );
+                                const invoke = (fn: ProcessFunction) =>
+                                    void Promise.resolve(
+                                        fn(replacement, el.content, processorCtx),
+                                    ).catch(() => {});
+                                if (el.type === 'inline-js') invoke(this.processInlineJs);
+                                if (el.type === 'inline-jsx') invoke(this.processInlineJsx);
+                                if (el.type === 'block-js') invoke(this.processBlockJs);
+                                if (el.type === 'block-jsx') invoke(this.processBlockJsx);
+
+                                readScope = writeScope;
+                                if (el.type.startsWith('inline')) el.el.replaceWith(replacement);
+                                else if (el.el.parentElement)
+                                    el.el.parentElement.replaceWith(replacement);
+                            } catch (err) {
+                                this.logger.error('Preview queue item failed', {
+                                    index,
+                                    type: el.type,
+                                    error: err,
+                                });
                             }
-                            writeScope = new ScopeNode(writeScopeId);
-                            readScope.addChild(writeScope);
-                            const processorCtx = {
-                                file,
-                                index,
-                                total: arr.length,
-                                mode: 'preview' as const,
-                                originalPreviewElement: el.el,
-                                shortcutComponent: el.shortcutComponent,
-                                readScope,
-                                writeScope,
-                                renderMode: 'reading' as const,
-                            };
-
-                            const replacement = document.createElement(
-                                el.type.startsWith('inline') ? 'span' : 'div',
-                            );
-                            const invoke = (fn: ProcessFunction) =>
-                                void Promise.resolve(
-                                    fn(replacement, el.content, processorCtx),
-                                ).catch(() => {});
-                            if (el.type === 'inline-js') invoke(this.processInlineJs);
-                            if (el.type === 'inline-jsx') invoke(this.processInlineJsx);
-                            if (el.type === 'block-js') invoke(this.processBlockJs);
-                            if (el.type === 'block-jsx') invoke(this.processBlockJsx);
-
-                            readScope = writeScope;
-                            if (el.type.startsWith('inline')) el.el.replaceWith(replacement);
-                            else if (el.el.parentElement)
-                                el.el.parentElement.replaceWith(replacement);
                         });
                     }
                 }

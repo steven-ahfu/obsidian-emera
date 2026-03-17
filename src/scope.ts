@@ -152,11 +152,12 @@ export class ScopeNode {
             this.parent.children.splice(this.parent.children.indexOf(this), 1);
             this.parent.removeDescendant(this);
         }
-        this.children.forEach((child) => child.dispose());
+        // Copy to avoid skipping elements when dispose() splices from the array
+        [...this.children].forEach((child) => child.dispose());
     }
 
     disposeDescendants() {
-        this.children.forEach((child) => child.dispose());
+        [...this.children].forEach((child) => child.dispose());
     }
 
     mapUp<T>(cb: (scope: ScopeNode) => T): T[] {

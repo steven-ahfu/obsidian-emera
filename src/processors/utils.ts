@@ -12,15 +12,17 @@ export const isCursorOnSameLineWithNode = (
     const node2Line = doc.lineAt(node2.to);
 
     const selection = state.selection;
-    for (let range of selection.ranges) {
+    const startLine = Math.min(node1Line.number, node2Line.number) - allowance;
+    const endLine = Math.max(node1Line.number, node2Line.number) + allowance;
+    for (const range of selection.ranges) {
         const cursorLineStart = doc.lineAt(range.from).number;
-        const cursorLineEnd = doc.lineAt(range.from).number;
-        const startLine = Math.min(node1Line.number, node2Line.number) - allowance;
-        const endLine = Math.max(node1Line.number, node2Line.number) + allowance;
-        return (
+        const cursorLineEnd = doc.lineAt(range.to).number;
+        if (
             (cursorLineStart >= startLine && cursorLineStart <= endLine) ||
             (cursorLineEnd >= startLine && cursorLineEnd <= endLine)
-        );
+        ) {
+            return true;
+        }
     }
 
     return false;

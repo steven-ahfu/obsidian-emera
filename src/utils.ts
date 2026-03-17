@@ -10,8 +10,8 @@ export const iife = <T>(cb: () => T): T => {
     return cb();
 };
 
-const CodeMirror = (window as any).CodeMirror;
 export const registerCodemirrorMode = (name: string, original: string) => {
+    const CodeMirror = (window as any).CodeMirror;
     CodeMirror.defineMode(name, (config: any) => CodeMirror.getMode(config, original));
     CodeMirror.defineMIME(`text/x-${name}`, 'jsx');
 };

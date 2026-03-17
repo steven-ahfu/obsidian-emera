@@ -21,6 +21,9 @@ jobs:
 
       - run: yarn install --frozen-lockfile
 
+      - name: Run tests
+        run: yarn test
+
       - name: Read version from manifest
         id: meta
         run: |

@@ -1,6 +1,6 @@
 {
     "name": "obsidian-emera",
-    "version": "1.4.6",
+    "version": "1.4.7",
     "description": "MDX for Obsidian. Kinda.",
     "main": "main.js",
     "scripts": {

@@ -7,6 +7,24 @@ import { EMERA_GET_SCOPE, EMERA_MODULES } from './consts';
 import { getScope, ScopeNode } from './scope';
 import { createLogger } from './logger';
 import { normalizeComponentsFolders } from './components-folder';
+import {
+    resolvePath,
+    isRuntimeExternalImport,
+    fromVaultModuleId,
+    truncateString,
+    toSerializable,
+    formatErrorForNotice,
+} from './bundler-utils';
+
+// Re-export for any external consumers
+export {
+    resolvePath,
+    isRuntimeExternalImport,
+    fromVaultModuleId,
+    truncateString,
+    toSerializable,
+    formatErrorForNotice,
+} from './bundler-utils';
 
 // @ts-ignore not included in package types, but it's there!
 const t = Babel.packages.types;
@@ -24,45 +42,87 @@ const someGlobalVars = new Set([
     '_jsx',
     '_Fragment',
     '_jsxs',
+
+    // Timers & scheduling
+    'setTimeout',
+    'setInterval',
+    'clearTimeout',
+    'clearInterval',
+    'requestAnimationFrame',
+    'cancelAnimationFrame',
+    'queueMicrotask',
+
+    // Network & I/O
+    'fetch',
+    'URL',
+    'URLSearchParams',
+    'Headers',
+    'Request',
+    'Response',
+    'AbortController',
+    'FormData',
+    'Blob',
+    'File',
+
+    // Encoding & crypto
+    'TextEncoder',
+    'TextDecoder',
+    'atob',
+    'btoa',
+    'crypto',
+    'structuredClone',
+
+    // Core JS built-ins
+    'Promise',
+    'Map',
+    'Set',
+    'WeakMap',
+    'WeakSet',
+    'Symbol',
+    'Proxy',
+    'Reflect',
+    'JSON',
+    'Math',
+    'Date',
+    'RegExp',
+    'Array',
+    'Object',
+    'String',
+    'Number',
+    'Boolean',
+    'Error',
+    'TypeError',
+
+    // Global functions & values
+    'parseInt',
+    'parseFloat',
+    'isNaN',
+    'isFinite',
+    'NaN',
+    'Infinity',
+    'undefined',
+
+    // Browser APIs
+    'performance',
+    'navigator',
+    'location',
+
+    // DOM observers & events
+    'Event',
+    'CustomEvent',
+    'MutationObserver',
+    'ResizeObserver',
+    'IntersectionObserver',
 ]);
-
-function resolvePath(base: string, relative: string) {
-    const stack = base.split('/');
-    const parts = relative.split('/');
-    stack.pop(); // remove current file name (or empty string)
-
-    for (let i = 0; i < parts.length; i++) {
-        if (parts[i] === '.') continue;
-        if (parts[i] === '..') stack.pop();
-        else stack.push(parts[i]);
-    }
-    const resolved = stack.join('/');
-    if (resolved.startsWith('..') || resolved.startsWith('/')) {
-        throw new Error(`Import path escapes vault root: ${relative}`);
-    }
-    return resolved;
-}
 
 const EMERA_VAULT_MODULE_PREFIX = 'emera://vault/';
 export const EMERA_DEBUG_LOG_PATH = '.obsidian/plugins/emera/last-error.json';
 const ROLLUP_WASM_FILE_PATH = '.obsidian/plugins/emera/bindings_wasm_bg.wasm';
 const MAX_DEBUG_EVENTS = 5000;
-const RUNTIME_EXTERNAL_IMPORT_PREFIXES = ['http://', 'https://'];
-
-function isRuntimeExternalImport(moduleId: string): boolean {
-    return RUNTIME_EXTERNAL_IMPORT_PREFIXES.some((prefix) => moduleId.startsWith(prefix));
-}
 
 function toVaultModuleId(vaultPath: string): string {
     const normalized = normalizePath(vaultPath).replace(/^\/+/, '');
     return `${EMERA_VAULT_MODULE_PREFIX}${normalized}`;
-}
-
-function fromVaultModuleId(moduleId: string): string {
-    if (!moduleId.startsWith(EMERA_VAULT_MODULE_PREFIX)) {
-        return moduleId;
-    }
-    return moduleId.slice(EMERA_VAULT_MODULE_PREFIX.length);
 }
 
 function importRewriter() {
@@ -354,59 +414,6 @@ type DebugRecorder = (stage: string, data?: unknown) => void;
 
 export type LoadTrigger = 'startup' | 'refresh' | 'auto-refresh';
 
-function truncateString(value: string, maxLength = 2000): string {
-    if (value.length <= maxLength) {
-        return value;
-    }
-    return `${value.slice(0, maxLength)}… [truncated ${value.length - maxLength} chars]`;
-}
-
-function toSerializable(value: unknown, depth = 0): unknown {
-    if (depth > 5) {
-        return '[MaxDepth]';
-    }
-
-    if (value == null || typeof value === 'number' || typeof value === 'boolean') {
-        return value;
-    }
-
-    if (typeof value === 'string') {
-        return truncateString(value);
-    }
-
-    if (typeof value === 'function') {
-        return `[Function ${value.name || 'anonymous'}]`;
-    }
-
-    if (value instanceof Error) {
-        const errorRecord: Record<string, unknown> = {
-            name: value.name,
-            message: value.message,
-            stack: truncateString(value.stack ?? ''),
-        };
-        const cause = (value as Error & { cause?: unknown }).cause;
-        if (cause !== undefined) {
-            errorRecord.cause = toSerializable(cause, depth + 1);
-        }
-        return errorRecord;
-    }
-
-    if (Array.isArray(value)) {
-        return value.slice(0, 200).map((item) => toSerializable(item, depth + 1));
-    }
-
-    if (typeof value === 'object') {
-        const entries = Object.entries(value as Record<string, unknown>).slice(0, 200);
-        const record: Record<string, unknown> = {};
-        for (const [key, val] of entries) {
-            record[key] = toSerializable(val, depth + 1);
-        }
-        return record;
-    }
-
-    return String(value);
-}
-
 function createDebugRecorder(
     trace: Array<{ at: string; stage: string; data: unknown }>,
 ): DebugRecorder {
@@ -421,53 +428,6 @@ function createDebugRecorder(
         });
     };
 }
-
-const formatErrorForNotice = (error: unknown): string => {
-    if (error instanceof Error) {
-        return error.message || error.toString();
-    }
-
-    if (typeof error === 'string') {
-        return error;
-    }
-
-    if (error && typeof error === 'object') {
-        const maybeRollup = error as {
-            message?: string;
-            plugin?: string;
-            id?: string;
-            loc?: { line?: number; column?: number; file?: string };
-            frame?: string;
-        };
-
-        const parts: string[] = [];
-        if (maybeRollup.message) parts.push(maybeRollup.message);
-        if (maybeRollup.plugin) parts.push(`plugin: ${maybeRollup.plugin}`);
-        if (maybeRollup.id) parts.push(`file: ${maybeRollup.id}`);
-        if (maybeRollup.loc) {
-            const file = maybeRollup.loc.file ? `${maybeRollup.loc.file}:` : '';
-            const line = maybeRollup.loc.line ?? '?';
-            const column = maybeRollup.loc.column ?? '?';
-            parts.push(`loc: ${file}${line}:${column}`);
-        }
-        if (maybeRollup.frame) {
-            const frameFirstLine = maybeRollup.frame.split('\n')[0];
-            if (frameFirstLine) parts.push(`frame: ${frameFirstLine}`);
-        }
-
-        if (parts.length > 0) {
-            return parts.join(' | ');
-        }
-
-        try {
-            return JSON.stringify(error, Object.getOwnPropertyNames(error), 2);
-        } catch {
-            // no-op
-        }
-    }
-
-    return String(error);
-};
 
 const writeDebugLog = async (
     plugin: EmeraPlugin,
@@ -486,78 +446,91 @@ const writeDebugLog = async (
     }
 };
 
+let _wasmPatchLock = Promise.resolve();
+
 const withRollupWasmUrlPatch = async <T>(
     plugin: EmeraPlugin,
     recordDebug: DebugRecorder,
     run: () => Promise<T>,
 ): Promise<T> => {
-    const originalURL = globalThis.URL;
-    if (typeof originalURL !== 'function') {
-        recordDebug('bundle.rollup.urlPatch.skipped.noUrlConstructor');
-        return run();
-    }
-
-    const wasmExists = await plugin.app.vault.adapter.exists(ROLLUP_WASM_FILE_PATH);
-    if (!wasmExists) {
-        recordDebug('bundle.rollup.urlPatch.skipped.noWasmFile', {
-            wasmPath: ROLLUP_WASM_FILE_PATH,
-        });
-        throw new Error(
-            `Missing Rollup WASM runtime at "${ROLLUP_WASM_FILE_PATH}". Re-deploy the plugin so "bindings_wasm_bg.wasm" is copied.`,
-        );
-    }
-
-    const wasmBinary = await plugin.app.vault.adapter.readBinary(ROLLUP_WASM_FILE_PATH);
-    const wasmBlobUrl = originalURL.createObjectURL(
-        new Blob([wasmBinary], { type: 'application/wasm' }),
-    );
-
-    recordDebug('bundle.rollup.urlPatch.prepared', {
-        wasmPath: ROLLUP_WASM_FILE_PATH,
-        wasmSize: wasmBinary.byteLength,
-        wasmBlobUrl,
+    const previous = _wasmPatchLock;
+    let releaseLock!: () => void;
+    _wasmPatchLock = new Promise<void>((resolve) => {
+        releaseLock = resolve;
     });
-
-    class PatchedURL extends originalURL {
-        constructor(url: string | URL, base?: string | URL) {
-            const urlString = typeof url === 'string' ? url : String(url);
-            const isRollupWasmRequest = urlString.endsWith('bindings_wasm_bg.wasm');
-
-            if (isRollupWasmRequest) {
-                try {
-                    super(url, base);
-                    return;
-                } catch (error) {
-                    const message = error instanceof Error ? error.message : String(error);
-                    if (message.includes('Invalid URL')) {
-                        super(wasmBlobUrl);
-                        return;
-                    }
-                    throw error;
-                }
-            }
-
-            super(url, base);
-        }
-    }
-
-    Object.defineProperty(globalThis, 'URL', {
-        configurable: true,
-        writable: true,
-        value: PatchedURL,
-    });
-    recordDebug('bundle.rollup.urlPatch.enabled');
+    await previous;
 
     try {
-        return await run();
-    } finally {
+        const originalURL = globalThis.URL;
+        if (typeof originalURL !== 'function') {
+            recordDebug('bundle.rollup.urlPatch.skipped.noUrlConstructor');
+            return run();
+        }
+
+        const wasmExists = await plugin.app.vault.adapter.exists(ROLLUP_WASM_FILE_PATH);
+        if (!wasmExists) {
+            recordDebug('bundle.rollup.urlPatch.skipped.noWasmFile', {
+                wasmPath: ROLLUP_WASM_FILE_PATH,
+            });
+            throw new Error(
+                `Missing Rollup WASM runtime at "${ROLLUP_WASM_FILE_PATH}". Re-deploy the plugin so "bindings_wasm_bg.wasm" is copied.`,
+            );
+        }
+
+        const wasmBinary = await plugin.app.vault.adapter.readBinary(ROLLUP_WASM_FILE_PATH);
+        const wasmBlobUrl = originalURL.createObjectURL(
+            new Blob([wasmBinary], { type: 'application/wasm' }),
+        );
+
+        recordDebug('bundle.rollup.urlPatch.prepared', {
+            wasmPath: ROLLUP_WASM_FILE_PATH,
+            wasmSize: wasmBinary.byteLength,
+            wasmBlobUrl,
+        });
+
+        class PatchedURL extends originalURL {
+            constructor(url: string | URL, base?: string | URL) {
+                const urlString = typeof url === 'string' ? url : String(url);
+                const isRollupWasmRequest = urlString.endsWith('bindings_wasm_bg.wasm');
+
+                if (isRollupWasmRequest) {
+                    try {
+                        super(url, base);
+                        return;
+                    } catch (error) {
+                        const message = error instanceof Error ? error.message : String(error);
+                        if (message.includes('Invalid URL')) {
+                            super(wasmBlobUrl);
+                            return;
+                        }
+                        throw error;
+                    }
+                }
+
+                super(url, base);
+            }
+        }
+
         Object.defineProperty(globalThis, 'URL', {
             configurable: true,
             writable: true,
-            value: originalURL,
+            value: PatchedURL,
         });
-        originalURL.revokeObjectURL(wasmBlobUrl);
-        recordDebug('bundle.rollup.urlPatch.restored');
+        recordDebug('bundle.rollup.urlPatch.enabled');
+
+        try {
+            return await run();
+        } finally {
+            Object.defineProperty(globalThis, 'URL', {
+                configurable: true,
+                writable: true,
+                value: originalURL,
+            });
+            originalURL.revokeObjectURL(wasmBlobUrl);
+            recordDebug('bundle.rollup.urlPatch.restored');
+        }
+    } finally {
+        releaseLock();
     }
 };
 
@@ -694,6 +667,7 @@ const rollupCssPlugin = (_plugin: EmeraPlugin, recordDebug?: DebugRecorder): Rol
         const injectionCode = `
           (function() {
             var style = document.createElement('style');
+            style.setAttribute('data-emera-css', '');
             style.textContent = ${JSON.stringify(code)};
             document.head.appendChild(style);
           })();
@@ -807,7 +781,6 @@ export const importFromString = async (
         return imported;
     } catch (error) {
         recordDebug?.('importFromString.error', { error: toSerializable(error) });
-        console.error('[Emera] Failed to import generated module from Blob URL', error);
         throw error;
     } finally {
         URL.revokeObjectURL(blobUrl);
@@ -897,6 +870,13 @@ export const loadUserModule = async (
         componentsFolders,
         pluginVersion: plugin.manifest.version,
     });
+
+    // Remove previously injected CSS to prevent unbounded DOM growth on refresh
+    const staleCssTags = document.head.querySelectorAll('style[data-emera-css]');
+    if (staleCssTags.length > 0) {
+        staleCssTags.forEach((el) => el.remove());
+        recordDebug('loadUserModule.cssCleanup', { removed: staleCssTags.length });
+    }
 
     const extensions = ['js', 'jsx', 'ts', 'tsx'];
     const indexFiles: Array<{ folder: string; indexFile: string }> = [];
