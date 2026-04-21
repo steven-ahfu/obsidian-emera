@@ -28,6 +28,9 @@ export const createEmeraStorage = (plugin: EmeraPlugin) => {
         if (flushTimerId !== null) {
             clearTimeout(flushTimerId);
             flushTimerId = null;
+            void flush().catch((error) => {
+                logger.error(`Failed to flush storage during destroy`, { filePath, error });
+            });
         }
         unsubFunction.forEach((cb) => cb());
     };
@@ -37,13 +40,22 @@ export const createEmeraStorage = (plugin: EmeraPlugin) => {
         await plugin.app.vault.adapter.write(filePath, stateStr);
     };
 
+    const scheduleFlush = () => {
+        if (flushTimerId !== null) {
+            clearTimeout(flushTimerId);
+        }
+
+        flushTimerId = setTimeout(() => {
+            flushTimerId = null;
+            void flush().catch((error) => {
+                logger.error(`Failed to flush storage`, { filePath, error });
+            });
+        }, 100);
+    };
+
     const set = (prop: string, val: any) => {
         state[prop] = val;
-        if (flushTimerId !== null) clearTimeout(flushTimerId);
-        flushTimerId = setTimeout(async () => {
-            await flush();
-            flushTimerId = null;
-        }, 100);
+        scheduleFlush();
     };
 
     const get = (prop: string) => {

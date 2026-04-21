@@ -263,13 +263,15 @@ export class EmeraPlugin extends Plugin {
             clearTimeout(this.autoRefreshTimeoutId);
         }
 
-        this.autoRefreshTimeoutId = setTimeout(async () => {
+        this.autoRefreshTimeoutId = setTimeout(() => {
             this.autoRefreshTimeoutId = null;
             if (!this.settings.autoRefreshEnabled) {
                 return;
             }
             this.logger.debug('Running auto refresh');
-            await this.refreshUserModule('auto-refresh');
+            void this.refreshUserModule('auto-refresh').catch((error) => {
+                this.logger.error('Auto refresh failed', { error });
+            });
         }, delay);
     }
 

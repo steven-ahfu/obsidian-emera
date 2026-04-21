@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { normalizeAutoRefreshDebounceMs, shouldAutoRefreshForPath } from '../src/auto-refresh';
+import { EmeraPlugin } from '../src/plugin';
+
+afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+});
 
 describe('normalizeAutoRefreshDebounceMs', () => {
     it('rounds and clamps finite values', () => {
@@ -101,5 +107,58 @@ describe('shouldAutoRefreshForPath', () => {
                 isFilesLoaded: true,
             }),
         ).toBe(false);
+    });
+});
+
+describe('EmeraPlugin.scheduleAutoRefresh', () => {
+    it('logs auto-refresh failures instead of leaking timer rejections', async () => {
+        vi.useFakeTimers();
+        const error = new Error('refresh failed');
+        const plugin = {
+            settings: {
+                autoRefreshEnabled: true,
+                autoRefreshDebounceMs: 25,
+            },
+            autoRefreshTimeoutId: null,
+            logger: {
+                debug: vi.fn(),
+                error: vi.fn(),
+            },
+            refreshUserModule: vi.fn(async () => {
+                throw error;
+            }),
+        };
+
+        (EmeraPlugin.prototype as any).scheduleAutoRefresh.call(plugin);
+        await vi.advanceTimersByTimeAsync(25);
+
+        expect(plugin.refreshUserModule).toHaveBeenCalledWith('auto-refresh');
+        expect(plugin.logger.debug).toHaveBeenCalledWith('Running auto refresh');
+        expect(plugin.logger.error).toHaveBeenCalledWith('Auto refresh failed', { error });
+        expect(plugin.autoRefreshTimeoutId).toBeNull();
+    });
+
+    it('skips auto refresh when the setting is disabled before the timer fires', async () => {
+        vi.useFakeTimers();
+        const plugin = {
+            settings: {
+                autoRefreshEnabled: true,
+                autoRefreshDebounceMs: 25,
+            },
+            autoRefreshTimeoutId: null,
+            logger: {
+                debug: vi.fn(),
+                error: vi.fn(),
+            },
+            refreshUserModule: vi.fn(async () => undefined),
+        };
+
+        (EmeraPlugin.prototype as any).scheduleAutoRefresh.call(plugin);
+        plugin.settings.autoRefreshEnabled = false;
+        await vi.advanceTimersByTimeAsync(25);
+
+        expect(plugin.refreshUserModule).not.toHaveBeenCalled();
+        expect(plugin.logger.debug).not.toHaveBeenCalled();
+        expect(plugin.logger.error).not.toHaveBeenCalled();
     });
 });
