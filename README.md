@@ -35,8 +35,6 @@ MDX.
 - [x] Hot reloading option now available in settings
 - [x] Verbose debug logging option added to settings
 - [x] Way more usage examples and docs (see `examples/`)
-- [x] An obsidian-emera agents skill (included in this repo)
-    - Will stay up to date with this repo's main branch 
 - [ ] Improved Runtime UX (In progress)
 
 
@@ -219,9 +217,12 @@ components for Obsidian.
 
 - `<Markdown />` – renders markdown using Obsidian's renderer. Props match a
   `div` except `children` must be a string.
-- `useEmeraContext()` – exposes `file`, `frontmatter`, and `storage`.
-- `useStorage<T>(key: string, defaultValue: T)` – provides persisted plugin-wide
-  state with a `useState`-like API.
+- `useEmeraContext()` – returns the full Emera context: `file`, `frontmatter`,
+  `app`, `storage`, `plugin`, and `renderMode` (`'reading' | 'editing' | 'canvas'`).
+- `useEmeraBasics()` – convenience wrapper returning `{ app, file, plugin, storage }`.
+  Use this when you don't need `frontmatter` or `renderMode`.
+- `useStorage<T>(key: string, defaultValue: T)` – persisted plugin-wide state
+  with a `useState`-like API. Values survive Obsidian restarts.
 
 ### Examples folder
 
