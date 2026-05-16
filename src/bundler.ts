@@ -447,6 +447,11 @@ const writeDebugLog = async (
 };
 
 let _wasmPatchLock = Promise.resolve();
+let _cachedWasmBlobUrl: string | null = null;
+
+export const _clearWasmCacheForTest = () => {
+    _cachedWasmBlobUrl = null;
+};
 
 const withRollupWasmUrlPatch = async <T>(
     plugin: EmeraPlugin,
@@ -467,26 +472,30 @@ const withRollupWasmUrlPatch = async <T>(
             return run();
         }
 
-        const wasmExists = await plugin.app.vault.adapter.exists(ROLLUP_WASM_FILE_PATH);
-        if (!wasmExists) {
-            recordDebug('bundle.rollup.urlPatch.skipped.noWasmFile', {
-                wasmPath: ROLLUP_WASM_FILE_PATH,
-            });
-            throw new Error(
-                `Missing Rollup WASM runtime at "${ROLLUP_WASM_FILE_PATH}". Re-deploy the plugin so "bindings_wasm_bg.wasm" is copied.`,
+        if (!_cachedWasmBlobUrl) {
+            const wasmExists = await plugin.app.vault.adapter.exists(ROLLUP_WASM_FILE_PATH);
+            if (!wasmExists) {
+                recordDebug('bundle.rollup.urlPatch.skipped.noWasmFile', {
+                    wasmPath: ROLLUP_WASM_FILE_PATH,
+                });
+                throw new Error(
+                    `Missing Rollup WASM runtime at "${ROLLUP_WASM_FILE_PATH}". Re-deploy the plugin so "bindings_wasm_bg.wasm" is copied.`,
+                );
+            }
+
+            const wasmBinary = await plugin.app.vault.adapter.readBinary(ROLLUP_WASM_FILE_PATH);
+            _cachedWasmBlobUrl = originalURL.createObjectURL(
+                new Blob([wasmBinary], { type: 'application/wasm' }),
             );
+            recordDebug('bundle.rollup.urlPatch.cached', {
+                wasmPath: ROLLUP_WASM_FILE_PATH,
+                wasmSize: wasmBinary.byteLength,
+            });
         }
 
-        const wasmBinary = await plugin.app.vault.adapter.readBinary(ROLLUP_WASM_FILE_PATH);
-        const wasmBlobUrl = originalURL.createObjectURL(
-            new Blob([wasmBinary], { type: 'application/wasm' }),
-        );
+        const wasmBlobUrl = _cachedWasmBlobUrl;
 
-        recordDebug('bundle.rollup.urlPatch.prepared', {
-            wasmPath: ROLLUP_WASM_FILE_PATH,
-            wasmSize: wasmBinary.byteLength,
-            wasmBlobUrl,
-        });
+        recordDebug('bundle.rollup.urlPatch.ready', { wasmBlobUrl });
 
         class PatchedURL extends originalURL {
             constructor(url: string | URL, base?: string | URL) {
@@ -526,13 +535,18 @@ const withRollupWasmUrlPatch = async <T>(
                 writable: true,
                 value: originalURL,
             });
-            originalURL.revokeObjectURL(wasmBlobUrl);
             recordDebug('bundle.rollup.urlPatch.restored');
         }
     } finally {
         releaseLock();
     }
 };
+
+export const _withRollupWasmUrlPatchForTest = <T>(
+    plugin: EmeraPlugin,
+    recordDebug: DebugRecorder,
+    run: () => Promise<T>,
+) => withRollupWasmUrlPatch(plugin, recordDebug, run);
 
 export const transpileCode = (
     code: string,
@@ -839,17 +853,19 @@ export const loadUserModule = async (
                   ? toSerializable((error as Record<string, unknown>).stack)
                   : null;
 
-        const debugPath = await writeDebugLog(plugin, {
-            phase,
-            trigger,
-            ok,
-            occurredAt: new Date().toISOString(),
-            errorText,
-            errorStack,
-            error: error ? toSerializable(error) : null,
-            context: toSerializable(context),
-            timeline,
-        });
+        const debugPath = ok
+            ? null
+            : await writeDebugLog(plugin, {
+                  phase,
+                  trigger,
+                  ok,
+                  occurredAt: new Date().toISOString(),
+                  errorText,
+                  errorStack,
+                  error: error ? toSerializable(error) : null,
+                  context: toSerializable(context),
+                  timeline,
+              });
 
         return {
             registry,
@@ -882,24 +898,32 @@ export const loadUserModule = async (
     const indexFiles: Array<{ folder: string; indexFile: string }> = [];
     const missingFolders: string[] = [];
 
-    for (const folder of componentsFolders) {
-        let indexFile: string | null = null;
-        for (const ext of extensions) {
-            const path = normalizePath(`${folder}/index.${ext}`);
-            const exists = await plugin.app.vault.adapter.exists(path);
-            recordDebug('loadUserModule.indexCandidate', { folder, path, exists });
-            if (exists) {
-                indexFile = path;
-                break;
+    const folderChecks = await Promise.all(
+        componentsFolders.map(async (folder) => {
+            const candidates = extensions.map((ext) => normalizePath(`${folder}/index.${ext}`));
+            const existsResults = await Promise.all(
+                candidates.map((path) => plugin.app.vault.adapter.exists(path)),
+            );
+            for (let i = 0; i < candidates.length; i++) {
+                recordDebug('loadUserModule.indexCandidate', {
+                    folder,
+                    path: candidates[i],
+                    exists: existsResults[i],
+                });
+                if (existsResults[i]) {
+                    return { folder, indexFile: candidates[i] };
+                }
             }
-        }
+            return { folder, indexFile: null };
+        }),
+    );
 
+    for (const { folder, indexFile } of folderChecks) {
         if (!indexFile) {
             missingFolders.push(folder);
-            continue;
+        } else {
+            indexFiles.push({ folder, indexFile });
         }
-
-        indexFiles.push({ folder, indexFile });
     }
 
     if (missingFolders.length > 0) {
