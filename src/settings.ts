@@ -196,28 +196,6 @@ export class SettingTab extends PluginSettingTab {
                     }),
             );
 
-        new Setting(containerEl)
-            .setName('Component Usage Map')
-            .setDesc('Display components and where they are used in the codebase (experimental)')
-            .addButton((button) =>
-                button.setButtonText('Show Map').onClick(async () => {
-                    const map = this.plugin.componentUsageMap;
-                    if (!map) {
-                        new Notice('Component usage map data is not yet available or empty.');
-                        return;
-                    }
-                    const formatted = Object.entries(map)
-                        .map(([component, locations]) => {
-                            return `${component}:\n  ${(locations as string[]).join(',\\n  ')}`;
-                        })
-                        .join('\\n\\n');
-                    new Notice(`Component Usage Map:\\n\\n${formatted}`, 20000);
-                }),
-            );
-    }
-
-    private getComponentUsageMap() {
-        return this.plugin.componentUsageMap;
     }
 }
 

@@ -429,6 +429,60 @@ function createDebugRecorder(
     };
 }
 
+const BUNDLE_CACHE_PATH = '.obsidian/plugins/emera/bundle-cache.json';
+
+type BundleCacheEntry = {
+    pluginVersion: string;
+    sourceHash: string;
+    bundledCode: string;
+};
+
+type BundleCache = Record<string, BundleCacheEntry>;
+
+const hashString = async (str: string): Promise<string> => {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buf))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+};
+
+const computeFolderHash = async (
+    plugin: EmeraPlugin,
+    folder: string,
+): Promise<string> => {
+    const allFiles = plugin.app.vault.getFiles().filter((f) => f.path.startsWith(folder + '/'));
+    allFiles.sort((a, b) => a.path.localeCompare(b.path));
+    const parts: string[] = [];
+    for (const file of allFiles) {
+        try {
+            const content = await plugin.app.vault.adapter.read(file.path);
+            parts.push(`${file.path}:${content}`);
+        } catch {
+            parts.push(`${file.path}:__unreadable__`);
+        }
+    }
+    return hashString(parts.join('\n'));
+};
+
+const readBundleCache = async (plugin: EmeraPlugin): Promise<BundleCache> => {
+    try {
+        const exists = await plugin.app.vault.adapter.exists(BUNDLE_CACHE_PATH);
+        if (!exists) return {};
+        const raw = await plugin.app.vault.adapter.read(BUNDLE_CACHE_PATH);
+        return JSON.parse(raw) as BundleCache;
+    } catch {
+        return {};
+    }
+};
+
+const writeBundleCache = async (plugin: EmeraPlugin, cache: BundleCache): Promise<void> => {
+    try {
+        await plugin.app.vault.adapter.write(BUNDLE_CACHE_PATH, JSON.stringify(cache));
+    } catch {
+        // Non-critical — next startup will just re-bundle
+    }
+};
+
 const writeDebugLog = async (
     plugin: EmeraPlugin,
     payload: Record<string, unknown>,
@@ -447,6 +501,11 @@ const writeDebugLog = async (
 };
 
 let _wasmPatchLock = Promise.resolve();
+let _cachedWasmBlobUrl: string | null = null;
+
+export const _clearWasmCacheForTest = () => {
+    _cachedWasmBlobUrl = null;
+};
 
 const withRollupWasmUrlPatch = async <T>(
     plugin: EmeraPlugin,
@@ -467,26 +526,30 @@ const withRollupWasmUrlPatch = async <T>(
             return run();
         }
 
-        const wasmExists = await plugin.app.vault.adapter.exists(ROLLUP_WASM_FILE_PATH);
-        if (!wasmExists) {
-            recordDebug('bundle.rollup.urlPatch.skipped.noWasmFile', {
-                wasmPath: ROLLUP_WASM_FILE_PATH,
-            });
-            throw new Error(
-                `Missing Rollup WASM runtime at "${ROLLUP_WASM_FILE_PATH}". Re-deploy the plugin so "bindings_wasm_bg.wasm" is copied.`,
+        if (!_cachedWasmBlobUrl) {
+            const wasmExists = await plugin.app.vault.adapter.exists(ROLLUP_WASM_FILE_PATH);
+            if (!wasmExists) {
+                recordDebug('bundle.rollup.urlPatch.skipped.noWasmFile', {
+                    wasmPath: ROLLUP_WASM_FILE_PATH,
+                });
+                throw new Error(
+                    `Missing Rollup WASM runtime at "${ROLLUP_WASM_FILE_PATH}". Re-deploy the plugin so "bindings_wasm_bg.wasm" is copied.`,
+                );
+            }
+
+            const wasmBinary = await plugin.app.vault.adapter.readBinary(ROLLUP_WASM_FILE_PATH);
+            _cachedWasmBlobUrl = originalURL.createObjectURL(
+                new Blob([wasmBinary], { type: 'application/wasm' }),
             );
+            recordDebug('bundle.rollup.urlPatch.cached', {
+                wasmPath: ROLLUP_WASM_FILE_PATH,
+                wasmSize: wasmBinary.byteLength,
+            });
         }
 
-        const wasmBinary = await plugin.app.vault.adapter.readBinary(ROLLUP_WASM_FILE_PATH);
-        const wasmBlobUrl = originalURL.createObjectURL(
-            new Blob([wasmBinary], { type: 'application/wasm' }),
-        );
+        const wasmBlobUrl = _cachedWasmBlobUrl;
 
-        recordDebug('bundle.rollup.urlPatch.prepared', {
-            wasmPath: ROLLUP_WASM_FILE_PATH,
-            wasmSize: wasmBinary.byteLength,
-            wasmBlobUrl,
-        });
+        recordDebug('bundle.rollup.urlPatch.ready', { wasmBlobUrl });
 
         class PatchedURL extends originalURL {
             constructor(url: string | URL, base?: string | URL) {
@@ -526,13 +589,18 @@ const withRollupWasmUrlPatch = async <T>(
                 writable: true,
                 value: originalURL,
             });
-            originalURL.revokeObjectURL(wasmBlobUrl);
             recordDebug('bundle.rollup.urlPatch.restored');
         }
     } finally {
         releaseLock();
     }
 };
+
+export const _withRollupWasmUrlPatchForTest = <T>(
+    plugin: EmeraPlugin,
+    recordDebug: DebugRecorder,
+    run: () => Promise<T>,
+) => withRollupWasmUrlPatch(plugin, recordDebug, run);
 
 export const transpileCode = (
     code: string,
@@ -839,17 +907,19 @@ export const loadUserModule = async (
                   ? toSerializable((error as Record<string, unknown>).stack)
                   : null;
 
-        const debugPath = await writeDebugLog(plugin, {
-            phase,
-            trigger,
-            ok,
-            occurredAt: new Date().toISOString(),
-            errorText,
-            errorStack,
-            error: error ? toSerializable(error) : null,
-            context: toSerializable(context),
-            timeline,
-        });
+        const debugPath = ok
+            ? null
+            : await writeDebugLog(plugin, {
+                  phase,
+                  trigger,
+                  ok,
+                  occurredAt: new Date().toISOString(),
+                  errorText,
+                  errorStack,
+                  error: error ? toSerializable(error) : null,
+                  context: toSerializable(context),
+                  timeline,
+              });
 
         return {
             registry,
@@ -882,24 +952,32 @@ export const loadUserModule = async (
     const indexFiles: Array<{ folder: string; indexFile: string }> = [];
     const missingFolders: string[] = [];
 
-    for (const folder of componentsFolders) {
-        let indexFile: string | null = null;
-        for (const ext of extensions) {
-            const path = normalizePath(`${folder}/index.${ext}`);
-            const exists = await plugin.app.vault.adapter.exists(path);
-            recordDebug('loadUserModule.indexCandidate', { folder, path, exists });
-            if (exists) {
-                indexFile = path;
-                break;
+    const folderChecks = await Promise.all(
+        componentsFolders.map(async (folder) => {
+            const candidates = extensions.map((ext) => normalizePath(`${folder}/index.${ext}`));
+            const existsResults = await Promise.all(
+                candidates.map((path) => plugin.app.vault.adapter.exists(path)),
+            );
+            for (let i = 0; i < candidates.length; i++) {
+                recordDebug('loadUserModule.indexCandidate', {
+                    folder,
+                    path: candidates[i],
+                    exists: existsResults[i],
+                });
+                if (existsResults[i]) {
+                    return { folder, indexFile: candidates[i] };
+                }
             }
-        }
+            return { folder, indexFile: null };
+        }),
+    );
 
+    for (const { folder, indexFile } of folderChecks) {
         if (!indexFile) {
             missingFolders.push(folder);
-            continue;
+        } else {
+            indexFiles.push({ folder, indexFile });
         }
-
-        indexFiles.push({ folder, indexFile });
     }
 
     if (missingFolders.length > 0) {
@@ -933,39 +1011,101 @@ export const loadUserModule = async (
     const mergedRegistry: Record<string, unknown> = {};
     const exportConflicts = new Set<string>();
 
+    const useCache = trigger === 'startup';
+    const bundleCache = useCache ? await readBundleCache(plugin) : {};
+    const updatedCache: BundleCache = { ...bundleCache };
+
     for (const { folder, indexFile } of indexFiles) {
         recordDebug('loadUserModule.indexSelected', { folder, indexFile });
         logger.debug('Loading index file', { folder, indexFile });
 
         let bundledCode = '';
-        try {
-            bundledCode = await bundleFile(plugin, indexFile, recordDebug);
-            recordDebug('loadUserModule.bundleSuccess', {
-                indexFile,
-                bundledCodeLength: bundledCode.length,
-            });
-        } catch (err) {
-            recordDebug('loadUserModule.bundleError', { indexFile, error: toSerializable(err) });
-            const { registry, ok, debugPath } = await finalize({
-                ok: false,
-                phase: 'bundle',
-                error: err,
-                context: {
+
+        if (useCache) {
+            const sourceHash = await computeFolderHash(plugin, folder);
+            const cacheKey = `${plugin.manifest.version}::${folder}`;
+            const cached = bundleCache[cacheKey];
+            if (cached && cached.sourceHash === sourceHash) {
+                bundledCode = cached.bundledCode;
+                recordDebug('loadUserModule.cacheHit', { folder, indexFile, sourceHash });
+                logger.debug('Bundle cache hit — skipping Rollup', { folder });
+            } else {
+                recordDebug('loadUserModule.cacheMiss', {
+                    folder,
                     indexFile,
-                    indexFiles,
-                },
-                registry: {},
-            });
-            const details = formatErrorForNotice(err);
-            logger.error('Failed to bundle user module', {
-                indexFile,
-                error: err,
-            });
-            new Notice('Error happened while bundling components: ' + details);
-            if (debugPath) {
-                new Notice(`Emera debug details written to ${debugPath}`);
+                    sourceHash,
+                    cachedHash: cached?.sourceHash ?? null,
+                });
+                try {
+                    bundledCode = await bundleFile(plugin, indexFile, recordDebug);
+                    updatedCache[cacheKey] = {
+                        pluginVersion: plugin.manifest.version,
+                        sourceHash,
+                        bundledCode,
+                    };
+                    recordDebug('loadUserModule.bundleSuccess', {
+                        indexFile,
+                        bundledCodeLength: bundledCode.length,
+                    });
+                } catch (err) {
+                    recordDebug('loadUserModule.bundleError', {
+                        indexFile,
+                        error: toSerializable(err),
+                    });
+                    const { registry, ok, debugPath } = await finalize({
+                        ok: false,
+                        phase: 'bundle',
+                        error: err,
+                        context: { indexFile, indexFiles },
+                        registry: {},
+                    });
+                    const details = formatErrorForNotice(err);
+                    logger.error('Failed to bundle user module', { indexFile, error: err });
+                    new Notice('Error happened while bundling components: ' + details);
+                    if (debugPath) {
+                        new Notice(`Emera debug details written to ${debugPath}`);
+                    }
+                    return { registry, ok };
+                }
             }
-            return { registry, ok };
+        } else {
+            try {
+                bundledCode = await bundleFile(plugin, indexFile, recordDebug);
+                // Update cache after successful non-startup bundle so next startup is fast
+                const sourceHash = await computeFolderHash(plugin, folder);
+                const cacheKey = `${plugin.manifest.version}::${folder}`;
+                updatedCache[cacheKey] = {
+                    pluginVersion: plugin.manifest.version,
+                    sourceHash,
+                    bundledCode,
+                };
+                recordDebug('loadUserModule.bundleSuccess', {
+                    indexFile,
+                    bundledCodeLength: bundledCode.length,
+                });
+            } catch (err) {
+                recordDebug('loadUserModule.bundleError', { indexFile, error: toSerializable(err) });
+                const { registry, ok, debugPath } = await finalize({
+                    ok: false,
+                    phase: 'bundle',
+                    error: err,
+                    context: {
+                        indexFile,
+                        indexFiles,
+                    },
+                    registry: {},
+                });
+                const details = formatErrorForNotice(err);
+                logger.error('Failed to bundle user module', {
+                    indexFile,
+                    error: err,
+                });
+                new Notice('Error happened while bundling components: ' + details);
+                if (debugPath) {
+                    new Notice(`Emera debug details written to ${debugPath}`);
+                }
+                return { registry, ok };
+            }
         }
 
         try {
@@ -1018,6 +1158,8 @@ export const loadUserModule = async (
             componentsFolders,
         });
     }
+
+    await writeBundleCache(plugin, updatedCache);
 
     const result = await finalize({
         ok: true,
